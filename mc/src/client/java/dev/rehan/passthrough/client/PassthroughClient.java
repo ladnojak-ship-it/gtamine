@@ -71,6 +71,7 @@ public class PassthroughClient implements ClientModInitializer {
 	private static boolean configured;
 	private static boolean worldRequested;
 	private static boolean screenOpen;
+	private static boolean chatWasOpen;
 	/** Server ticks until the setup commands run (the player isn't in the player list yet when JOIN fires). */
 	private static int setupIn = -1;
 	private static int respawnIn;
@@ -155,6 +156,14 @@ public class PassthroughClient implements ClientModInitializer {
 		}
 		if (screenOpen && ScreenInput.wantsCursor()) {
 			Passthrough.events.accept("{\"t\":\"mouseack\",\"ok\":true}");
+		}
+
+		// the chat is the one screen that wants the keyboard, so the host keys for us: it turns keystrokes
+		// into text with the layout the player is typing in, instead of us fighting for the window focus
+		final boolean chatOpen = ChatInput.isOpen(minecraft);
+		if (chatOpen != chatWasOpen) {
+			chatWasOpen = chatOpen;
+			Passthrough.events.accept(chatOpen ? "{\"t\":\"chatopen\",\"open\":true}" : "{\"t\":\"chatopen\",\"open\":false}");
 		}
 
 		if (!configured) {

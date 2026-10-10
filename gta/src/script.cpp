@@ -19,6 +19,7 @@
 #include <cstring>
 #include <string>
 #include <map>
+#include <mutex>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -1860,6 +1861,117 @@ namespace
 		}
 	}
 
+	// --- Typing into Minecraft's chat. Windows only hands the focus to the foreground process, so instead of
+	// fighting for it the host keys for us: while the chat is open a low-level keyboard hook turns keys into
+	// text and queues them for the script thread to send. The hook lives only as long as the chat does, and
+	// stands down if the script stops feeding it, so it can never hold the keyboard hostage.
+	struct ChatKey
+	{
+		UINT vk = 0;
+		int len = 0;
+		char text[8] = {};
+	};
+	static HHOOK g_chatHook = nullptr;
+	static DWORD g_hookFed = 0;
+	static std::mutex g_chatMutex;
+	static std::vector<ChatKey> g_chatQueue;
+
+	/// The character a key produces in the layout the user is actually typing in (Russian included).
+	static int vk_to_char(const UINT vk)
+	{
+		if ((GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000))
+			return 0; // a shortcut, not text
+		BYTE state[256] = {};
+		if (GetKeyState(VK_SHIFT) & 0x8000)
+			state[VK_SHIFT] = 0x80;
+		if (GetKeyState(VK_CAPITAL) & 0x0001)
+			state[VK_CAPITAL] = 0x01;
+		wchar_t out[8] = {};
+		DWORD thread = 0;
+		if (const HWND fg = GetForegroundWindow())
+			thread = GetWindowThreadProcessId(fg, nullptr);
+		const HKL layout = GetKeyboardLayout(thread ? thread : GetCurrentThreadId());
+		const int n = ToUnicodeEx(vk, 0, state, out, 8, 0, layout);
+		if (n == 1 && out[0] >= 32 && out[0] != 127)
+			return int(out[0]);
+		return 0;
+	}
+
+	static LRESULT CALLBACK chat_keyboard_proc(const int code, const WPARAM wParam, const LPARAM lParam)
+	{
+		if (code != HC_ACTION || g_chatHook == nullptr || GetTickCount() - g_hookFed > 4000)
+			return CallNextHookEx(nullptr, code, wParam, lParam);
+		if (wParam != WM_KEYDOWN && wParam != WM_SYSKEYDOWN)
+			return CallNextHookEx(nullptr, code, wParam, lParam);
+		const auto *kb = reinterpret_cast<const KBDLLHOOKSTRUCT *>(lParam);
+		ChatKey key;
+		key.vk = kb->vkCode;
+		if (key.vk != VK_RETURN && key.vk != VK_BACK && key.vk != VK_ESCAPE)
+		{
+			const int c = vk_to_char(kb->vkCode);
+			if (c == 0)
+				return CallNextHookEx(nullptr, code, wParam, lParam); // not text: leave it to the game
+			key.text[0] = (char)(c < 128 ? c : '?');
+			key.len = 1;
+		}
+		{
+			std::lock_guard<std::mutex> lock(g_chatMutex);
+			if (g_chatQueue.size() >= 64)
+				return CallNextHookEx(nullptr, code, wParam, lParam); // full: let the game have it
+			g_chatQueue.push_back(key);
+		}
+		return 1; // swallowed: the game must not act on it
+	}
+
+	static void chat_hook(const bool on)
+	{
+		if (on && g_chatHook == nullptr)
+		{
+			g_chatHook = SetWindowsHookExW(WH_KEYBOARD_LL, chat_keyboard_proc, GetModuleHandleW(nullptr), 0);
+			g_hookFed = GetTickCount();
+			dbg("keyboard hook installed: %p", (void *)g_chatHook);
+		}
+		else if (!on && g_chatHook != nullptr)
+		{
+			UnhookWindowsHookEx(g_chatHook);
+			g_chatHook = nullptr;
+			std::lock_guard<std::mutex> lock(g_chatMutex);
+			g_chatQueue.clear();
+			dbg("keyboard hook removed");
+		}
+	}
+
+	/// Send what the hook queued. Called from the script thread, never from the hook itself.
+	void chat_tick()
+	{
+		std::vector<ChatKey> pending;
+		{
+			std::lock_guard<std::mutex> lock(g_chatMutex);
+			pending.swap(g_chatQueue);
+		}
+		for (const auto &key : pending)
+		{
+			if (key.vk == VK_RETURN)
+				g_ws.send("{\"t\":\"chatkey\",\"k\":\"enter\"}");
+			else if (key.vk == VK_BACK)
+				g_ws.send("{\"t\":\"chatkey\",\"k\":\"back\"}");
+			else if (key.vk == VK_ESCAPE)
+				g_ws.send("{\"t\":\"chatkey\",\"k\":\"escape\"}");
+			else if (key.len > 0)
+			{
+				std::string esc;
+				for (int i = 0; i < key.len; ++i)
+				{
+					const char c = key.text[i];
+					if (c == '"' || c == '\\' || (unsigned char)c < 32)
+						esc += '\\';
+					esc += c;
+				}
+				g_ws.send("{\"t\":\"chattext\",\"c\":\"" + esc + "\"}");
+			}
+		}
+	}
+
 	// --- Focus swapping. Minecraft's own screens (inventory, chests, chat) need the keyboard and the
 	// mouse, which only the focused window receives. Minecraft renders unfocused and never pauses, so
 	// moving the focus there and back is safe and the passthrough keeps running while it is open.
@@ -2066,6 +2178,12 @@ namespace
 		if (type == "mouseack")
 		{
 			g_mouseSink = json_value(message, "ok") != nullptr && std::strncmp(json_value(message, "ok"), "true", 4) == 0;
+			return;
+		}
+		if (type == "chatopen")
+		{
+			const char *on = json_value(message, "open");
+			chat_hook(on != nullptr && std::strncmp(on, "true", 4) == 0);
 			return;
 		}
 		if (type == "gta")
@@ -2381,6 +2499,18 @@ namespace
 				if (dx != 0.0f || dy != 0.0f)
 					sendf("{\"t\":\"mouse\",\"dx\":%.5f,\"dy\":%.5f}", dx, dy);
 			}
+		}
+		// the hook only ever feeds us while the script is alive and the link is up, so it cannot outlive
+		// a session and swallow keys nobody is reading
+		if (g_chatHook != nullptr)
+		{
+			if (g_ws.connected())
+			{
+				g_hookFed = GetTickCount();
+				chat_tick();
+			}
+			else
+				chat_hook(false);
 		}
 
 		// the player's take-off: Space (jump) while armed, or a real fall off something tall

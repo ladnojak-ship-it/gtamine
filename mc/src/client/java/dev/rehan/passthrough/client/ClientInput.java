@@ -20,6 +20,9 @@ final class ClientInput {
 		switch (m.get("t").getAsString()) {
 			// the host's mouse, forwarded because a screen of our own is open over its picture
 			case "mouse" -> ScreenInput.move(minecraft, m.get("dx").getAsDouble() * 800.0, m.get("dy").getAsDouble() * 800.0);
+			// the host's keyboard, forwarded because its chat is open: real commands are typed in
+			case "chattext" -> ChatInput.text(minecraft, m.get("c").getAsString(), m.has("mods") ? m.get("mods").getAsInt() : 0);
+			case "chatkey" -> ChatInput.special(minecraft, m.get("k").getAsString());
 			case "key" -> {
 				String k = m.get("k").getAsString();
 				boolean down = !m.has("down") || m.get("down").getAsBoolean();
