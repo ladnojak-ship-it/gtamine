@@ -1873,6 +1873,7 @@ namespace
 	};
 	static HHOOK g_chatHook = nullptr;
 	static DWORD g_hookFed = 0;
+	static int g_keyLog = 0;
 	static std::mutex g_chatMutex;
 	static std::vector<ChatKey> g_chatQueue;
 
@@ -1905,6 +1906,8 @@ namespace
 		if (wParam != WM_KEYDOWN && wParam != WM_SYSKEYDOWN)
 			return CallNextHookEx(nullptr, code, wParam, lParam);
 		const auto *kb = reinterpret_cast<const KBDLLHOOKSTRUCT *>(lParam);
+		if (++g_keyLog <= 20)
+			dbg("hook key vk=%u scan=%u flags=%u", (unsigned)kb->vkCode, (unsigned)kb->scanCode, (unsigned)kb->flags);
 		ChatKey key;
 		key.vk = kb->vkCode;
 		if (key.vk != VK_RETURN && key.vk != VK_BACK && key.vk != VK_ESCAPE)
@@ -2471,9 +2474,15 @@ namespace
 	void forward_button(int control, const char *key)
 	{
 		if (natives::IsDisabledControlJustPressed(0, control))
+		{
 			sendf("{\"t\":\"key\",\"k\":\"%s\",\"down\":true}", key);
+			dbg("key down %s", key);
+		}
 		if (natives::IsDisabledControlJustReleased(0, control))
+		{
 			sendf("{\"t\":\"key\",\"k\":\"%s\",\"down\":false}", key);
+			dbg("key up %s", key);
+		}
 	}
 
 	void tick()

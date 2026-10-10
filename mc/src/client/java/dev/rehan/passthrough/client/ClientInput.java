@@ -49,6 +49,7 @@ final class ClientInput {
 						default -> -1;
 					};
 					if (button >= 0) {
+						Passthrough.LOG.info("click button={} down={} at {},{}", button, down, ScreenInput.cursorX(), ScreenInput.cursorY());
 						ScreenInput.mouse(down, button);
 						return;
 					}
