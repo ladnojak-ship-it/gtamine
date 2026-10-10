@@ -1866,6 +1866,9 @@ namespace
 	static DWORD g_mcPid = 0;
 	static HWND g_mcWindow = nullptr;
 	static HWND g_gtaWindow = nullptr;
+	// While a screen of Minecraft's own is open, the mouse steers its cursor instead of GTA's camera
+	static std::atomic<bool> g_mcScreen{false};
+	static std::atomic<bool> g_mouseSink{false};
 
 	/// Minecraft's window, by the pid the mod reported with hello. Only local calls are used:
 	/// GetWindowTextW would send WM_GETTEXT to another process and wait, which can hang the caller.
@@ -1966,28 +1969,40 @@ namespace
 		// a window of another process: it may be minimized, so restore it before taking the focus
 		ShowWindow(hwnd, SW_RESTORE);
 		dbg("raise_window: ShowWindow done");
-		DWORD targetThread = GetWindowThreadProcessId(hwnd, nullptr);
+		// Windows' foreground lock is per *thread*, and it is the thread that owns the foreground window
+		// that decides: attach our thread to that one first, which is what makes the switch stick.
+		HWND foreground = GetForegroundWindow();
+		DWORD lockThread = foreground ? GetWindowThreadProcessId(foreground, nullptr) : 0;
 		DWORD thisThread = GetCurrentThreadId();
+		dbg("raise_window: target=%lu our=%lu lockThread=%lu(exstyle=%08lx)",
+			(unsigned long)GetWindowThreadProcessId(hwnd, nullptr), (unsigned long)thisThread,
+			(unsigned long)lockThread, (unsigned long)GetWindowLongA(hwnd, GWL_EXSTYLE));
 		bool attached = false;
-		dbg("raise_window: targetThread=%lu thisThread=%lu", (unsigned long)targetThread, (unsigned long)thisThread);
-		if (targetThread && targetThread != thisThread)
+		if (lockThread && lockThread != thisThread)
 		{
-			attached = AttachThreadInput(thisThread, targetThread, TRUE) != FALSE;
-			dbg("raise_window: AttachThreadInput -> %d", (int)attached);
+			attached = AttachThreadInput(lockThread, thisThread, TRUE) != FALSE;
+			dbg("raise_window: AttachThreadInput(lock) -> %d", (int)attached);
 		}
 		if (!SetForegroundWindow(hwnd))
 		{
-			dbg("raise_window: SetForegroundWindow FAILED, trying SwitchToThisWindow");
-			if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
+			dbg("raise_window: SetForegroundWindow failed, err=%lu", (unsigned long)GetLastError());
+			// last resort: lift the window above everything just long enough to take the focus
+			SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+			if (!SetForegroundWindow(hwnd))
 			{
-				using SwitchToThisWindowFn = void (WINAPI *)(HWND, BOOL);
-				if (auto switchTo = reinterpret_cast<SwitchToThisWindowFn>(GetProcAddress(user32, "SwitchToThisWindow")))
-					switchTo(hwnd, TRUE);
+				dbg("raise_window: still failed, trying SwitchToThisWindow, err=%lu", (unsigned long)GetLastError());
+				if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
+				{
+					using SwitchToThisWindowFn = void (WINAPI *)(HWND, BOOL);
+					if (auto switchTo = reinterpret_cast<SwitchToThisWindowFn>(GetProcAddress(user32, "SwitchToThisWindow")))
+						switchTo(hwnd, TRUE);
+				}
 			}
+			SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 		}
-		dbg("raise_window: SetForegroundWindow done (foreground now %p)", (void *)GetForegroundWindow());
+		dbg("raise_window: foreground now %p", (void *)GetForegroundWindow());
 		if (attached)
-			AttachThreadInput(thisThread, targetThread, FALSE);
+			AttachThreadInput(lockThread, thisThread, FALSE);
 	}
 
 	void mc_focus(const bool on)
@@ -2037,6 +2052,20 @@ namespace
 		{
 			const char *on = json_value(message, "on");
 			mc_focus(on != nullptr && std::strncmp(on, "true", 4) == 0);
+			return;
+		}
+		if (type == "screen")
+		{
+			// a screen of Minecraft's own is open: GTA's own look controls stand down so the mouse can
+			// steer the cursor instead of the camera, and Minecraft's picture (already composited as the
+			// overlay) becomes usable
+			g_mcScreen = json_value(message, "open") != nullptr && std::strncmp(json_value(message, "open"), "true", 4) == 0;
+			dbg("screen open=%d", (int)g_mcScreen);
+			return;
+		}
+		if (type == "mouseack")
+		{
+			g_mouseSink = json_value(message, "ok") != nullptr && std::strncmp(json_value(message, "ok"), "true", 4) == 0;
 			return;
 		}
 		if (type == "gta")
@@ -2337,6 +2366,21 @@ namespace
 				natives::Notify(armed ? "Elytra ~g~armed: Space to take off" : "Elytra ~r~put away");
 			}
 			f6Down = f6;
+		}
+
+		// a screen of Minecraft's own is open (inventory, chest, chat): its picture is already drawn over
+		// GTA's as the overlay, so only the cursor is missing. GTA's look stands down and the mouse
+		// steers the cursor, which keeps the focus with GTA and its window untouched.
+		if (g_mcScreen)
+		{
+			natives::DisableControlAction(0, 1, TRUE);
+			natives::DisableControlAction(0, 2, TRUE);
+			if (g_mouseSink)
+			{
+				const float dx = natives::GetDisabledControlNormal(0, 1), dy = natives::GetDisabledControlNormal(0, 2);
+				if (dx != 0.0f || dy != 0.0f)
+					sendf("{\"t\":\"mouse\",\"dx\":%.5f,\"dy\":%.5f}", dx, dy);
+			}
 		}
 
 		// the player's take-off: Space (jump) while armed, or a real fall off something tall

@@ -70,6 +70,7 @@ public class PassthroughClient implements ClientModInitializer {
 	);
 	private static boolean configured;
 	private static boolean worldRequested;
+	private static boolean screenOpen;
 	/** Server ticks until the setup commands run (the player isn't in the player list yet when JOIN fires). */
 	private static int setupIn = -1;
 	private static int respawnIn;
@@ -135,8 +136,6 @@ public class PassthroughClient implements ClientModInitializer {
 		return b.toString();
 	}
 
-	private static boolean screenOpen = false;
-
 	private static void tick(final Minecraft minecraft) {
 		// a death (the void) would leave the death screen over the host's picture: respawn straight away
 		if (minecraft.player != null && minecraft.gui.screen() instanceof DeathScreen && --respawnIn <= 0) {
@@ -144,13 +143,18 @@ public class PassthroughClient implements ClientModInitializer {
 			minecraft.player.respawn();
 		}
 
-		// a screen (inventory, chest, chat) needs the keyboard and the mouse, which only the focused
-		// window gets: hand the focus over for as long as one is open, and take it back when it closes
+		// a screen of our own (inventory, chest, chat) is drawn over the host's picture as the overlay, but
+		// the mouse belongs to the host: tell it to steer our cursor instead of its own camera, rather than
+		// fighting over which window has the focus
 		final boolean open = minecraft.gui.screen() != null;
 		if (open != screenOpen) {
 			screenOpen = open;
-			Passthrough.LOG.info("focus {}, screen {}", open ? "on" : "off", minecraft.gui.screen());
-			Passthrough.events.accept(open ? "{\"t\":\"focus\",\"on\":true}" : "{\"t\":\"focus\",\"on\":false}");
+			ScreenInput.resetScreen();
+			Passthrough.LOG.info("screen {}, screen {}", open ? "open" : "closed", minecraft.gui.screen());
+			Passthrough.events.accept(open ? "{\"t\":\"screen\",\"open\":true}" : "{\"t\":\"screen\",\"open\":false}");
+		}
+		if (screenOpen && ScreenInput.wantsCursor()) {
+			Passthrough.events.accept("{\"t\":\"mouseack\",\"ok\":true}");
 		}
 
 		if (!configured) {

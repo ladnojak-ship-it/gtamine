@@ -18,6 +18,8 @@ final class ClientInput {
 	static void handle(final Minecraft minecraft, final JsonObject m) {
 		LocalPlayer player = minecraft.player;
 		switch (m.get("t").getAsString()) {
+			// the host's mouse, forwarded because a screen of our own is open over its picture
+			case "mouse" -> ScreenInput.move(minecraft, m.get("dx").getAsDouble() * 800.0, m.get("dy").getAsDouble() * 800.0);
 			case "key" -> {
 				String k = m.get("k").getAsString();
 				boolean down = !m.has("down") || m.get("down").getAsBoolean();
@@ -27,6 +29,26 @@ final class ClientInput {
 					}
 
 					return;
+				}
+
+				// a screen of our own is open: its buttons are the mouse at the cursor, not keybindings
+				if (minecraft.gui.screen() != null) {
+					final int button = switch (k) {
+						case "attack" -> 0;
+						case "use" -> 1;
+						default -> -1;
+					};
+					if (button >= 0) {
+						ScreenInput.mouse(down, button);
+						return;
+					}
+					if (k.equals("inventory") || k.equals("escape")) {
+						if (down) {
+							minecraft.gui.screen().onClose();
+						}
+
+						return;
+					}
 				}
 
 				KeyMapping key = switch (k) {
