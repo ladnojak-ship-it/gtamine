@@ -1877,7 +1877,7 @@ namespace
 	static std::vector<ChatKey> g_chatQueue;
 
 	/// The character a key produces in the layout the user is actually typing in (Russian included).
-	static int vk_to_char(const UINT vk)
+	static int vk_to_char(const UINT vk, const UINT scanCode)
 	{
 		if ((GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000))
 			return 0; // a shortcut, not text
@@ -1891,7 +1891,8 @@ namespace
 		if (const HWND fg = GetForegroundWindow())
 			thread = GetWindowThreadProcessId(fg, nullptr);
 		const HKL layout = GetKeyboardLayout(thread ? thread : GetCurrentThreadId());
-		const int n = ToUnicodeEx(vk, 0, state, out, 8, 0, layout);
+		// the scan code is required: without it the layout lookup returns nothing
+		const int n = ToUnicodeEx(vk, scanCode, state, out, 8, 0, layout);
 		if (n == 1 && out[0] >= 32 && out[0] != 127)
 			return int(out[0]);
 		return 0;
@@ -1908,7 +1909,7 @@ namespace
 		key.vk = kb->vkCode;
 		if (key.vk != VK_RETURN && key.vk != VK_BACK && key.vk != VK_ESCAPE)
 		{
-			const int c = vk_to_char(kb->vkCode);
+			const int c = vk_to_char(kb->vkCode, kb->scanCode);
 			if (c == 0)
 				return CallNextHookEx(nullptr, code, wParam, lParam); // not text: leave it to the game
 			key.text[0] = (char)(c < 128 ? c : '?');
