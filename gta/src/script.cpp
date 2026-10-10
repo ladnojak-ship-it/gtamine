@@ -2196,6 +2196,19 @@ namespace
 		{
 			forward_button(24, "attack");
 			forward_button(25, "use");
+			// E opens Minecraft's inventory. VK_E is position-based, so a Russian layout maps it to the
+			// same physical key. GTA's own enter/context action is suppressed while it is held.
+			{
+				static bool eDown = false;
+				const bool e = (GetAsyncKeyState(0x45) & 0x8000) != 0;
+				if (e != eDown)
+				{
+					eDown = e;
+					sendf("{\"t\":\"key\",\"k\":\"inventory\",\"down\":%s}", e ? "true" : "false");
+				}
+				if (e)
+					natives::DisableControlAction(0, 23, TRUE);
+			}
 		}
 		aim_cam_tick(gun && natives::IsPlayerFreeAiming(natives::PlayerId()));
 		gun_model_tick(ped, gun && !natives::IsPauseMenuActive());
