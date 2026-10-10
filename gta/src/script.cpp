@@ -190,7 +190,7 @@ namespace
 		Vector3 mn = {}, mx = {};
 		std::map<std::tuple<int, int, int>, Object> live;
 		std::vector<std::tuple<int, int, int>> pending;
-		static constexpr size_t kMax = 400; // GTA crashes (access violation) with ~1500 script objects about
+		static constexpr size_t kMax = 800; // GTA crashes (access violation) with ~1500 script objects about; 800 leaves ~700 for mobs, peds and cars
 	} g_props;
 	void props_clear_all();
 	std::vector<std::pair<int, int>> g_spiral;
