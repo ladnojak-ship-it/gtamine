@@ -1937,18 +1937,35 @@ namespace
 
 	/// Give the foreground window to hwnd. Windows only lets the *foreground* process raise a window, and
 	/// even then it can refuse: attaching to the target's input thread first is what makes it reliable.
-	static void raise_window(const HWND hwnd)
+	///
+	/// For our own window only the focus is asked for. BringWindowToTop and ShowWindow on a window the
+	/// game's own thread owns mid-frame take the game down, and SetForegroundWindow already raises it.
+	static void raise_window(const HWND hwnd, const bool ours)
 	{
-		dbg("raise_window: hwnd=%p", (void *)hwnd);
+		dbg("raise_window: hwnd=%p ours=%d", (void *)hwnd, (int)ours);
 		if (!hwnd || !IsWindow(hwnd))
 		{
 			dbg("raise_window: not a window");
 			return;
 		}
+		if (ours)
+		{
+			if (!SetForegroundWindow(hwnd))
+			{
+				// last resort: the undocumented call Alt-Tab itself makes, which ignores the foreground lock
+				if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
+				{
+					using SwitchToThisWindowFn = void (WINAPI *)(HWND, BOOL);
+					if (auto switchTo = reinterpret_cast<SwitchToThisWindowFn>(GetProcAddress(user32, "SwitchToThisWindow")))
+						switchTo(hwnd, TRUE);
+				}
+			}
+			dbg("raise_window: ours, foreground now %p", (void *)GetForegroundWindow());
+			return;
+		}
+		// a window of another process: it may be minimized, so restore it before taking the focus
 		ShowWindow(hwnd, SW_RESTORE);
 		dbg("raise_window: ShowWindow done");
-		BringWindowToTop(hwnd);
-		dbg("raise_window: BringWindowToTop done");
 		DWORD targetThread = GetWindowThreadProcessId(hwnd, nullptr);
 		DWORD thisThread = GetCurrentThreadId();
 		bool attached = false;
@@ -1961,7 +1978,6 @@ namespace
 		if (!SetForegroundWindow(hwnd))
 		{
 			dbg("raise_window: SetForegroundWindow FAILED, trying SwitchToThisWindow");
-			// last resort: the undocumented call Alt-Tab itself makes, which ignores the foreground lock
 			if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
 			{
 				using SwitchToThisWindowFn = void (WINAPI *)(HWND, BOOL);
@@ -1989,7 +2005,7 @@ namespace
 				return;
 			}
 			dbg("  window %p found, raising", (void *)w);
-			raise_window(w);
+			raise_window(w, false);
 			natives::Notify("Passthrough: Minecraft ~g~focus");
 		}
 		else
@@ -2001,7 +2017,7 @@ namespace
 				dbg("  FAILED: GTA window not found");
 				return;
 			}
-			raise_window(w);
+			raise_window(w, true);
 			natives::Notify("Passthrough: GTA ~g~focus");
 		}
 	}
