@@ -3,6 +3,8 @@ package dev.rehan.passthrough.client;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
 
 /**
  * The cursor inside a screen of minecraft's own, while the host (GTA) has the focus and the mouse.
@@ -57,11 +59,12 @@ public final class ScreenInput {
 		if (screen == null) {
 			return;
 		}
+		final MouseButtonEvent event = new MouseButtonEvent(x, y, new MouseButtonInfo(button, 0));
 		if (down) {
 			move(minecraft, 0.0, 0.0);
-			screen.mouseClicked(x, y, button);
+			screen.mouseClicked(event, false);
 		} else {
-			screen.mouseReleased(x, y, button);
+			screen.mouseReleased(event);
 		}
 	}
 }
