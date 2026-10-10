@@ -54,6 +54,7 @@ jobs:
           if (-not $vsPath) { Write-Error "Visual Studio with C++ tools not found"; exit 1 }
           $vcvars = "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
           Write-Output "Using: $vcvars"
+          New-Item -ItemType Directory -Path "build" -Force | Out-Null
           $buildCmd = "call `"$vcvars`" && cl /nologo /LD /O2 /EHsc /std:c++20 /MT /W3 /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I `"third_party\shv`" /I `"third_party\reshade`" `"src\script.cpp`" `"src\compositor.cpp`" `"src\ws.cpp`" /Fo`"build\\`" /Fe`"build\MCPassthrough.asi`" /link `"third_party\shv\ScriptHookV.lib`" ws2_32.lib user32.lib"
           cmd /c $buildCmd
 
