@@ -1853,7 +1853,7 @@ namespace
 		va_start(args, fmt);
 		vsnprintf(line, sizeof(line), fmt, args);
 		va_end(args);
-		if (FILE *f = fopen(path, "a"))
+		if (FILE *f = nullptr; fopen_s(&f, path, "a") == 0 && f)
 		{
 			fprintf(f, "[%u] %s\n", natives::GetGameTimer(), line);
 			fclose(f);
@@ -2149,7 +2149,8 @@ namespace
 			return;
 		// where Minecraft's player is now: its last sample, carried forward by its velocity to this moment
 		const float dt = std::clamp(float(now - g_drive.posNanos) * 1e-9f, 0.0f, 0.1f);
-		const float tx = g_drive.pos.x + g_drive.vel.x * dt, ty = g_drive.pos.y + g_drive.vel.y * dt, tz = g_drive.pos.z + g_drive.vel.z * dt;
+		const float tx = g_drive.pos.x + g_drive.vel.x * dt, ty = g_drive.pos.y + g_drive.vel.y * dt;
+		float tz = g_drive.pos.z + g_drive.vel.z * dt;
 		if (g_drive.user && g_drive.vel.z < 0.0f && natives::GetGameTimer() - g_drive.launchedAt > 1000)
 		{
 			// Minecraft's player goes through GTA's world (it isn't in Minecraft): land on whatever is below instead
