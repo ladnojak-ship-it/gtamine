@@ -1929,6 +1929,7 @@ namespace
 	// down if the script stops feeding it, exactly like the keyboard one.
 	static HHOOK g_mouseHook = nullptr;
 	static POINT g_lastCursor = {LONG_MIN, 0};
+	static int g_mouseLog = 0;
 	static std::mutex g_mouseMutex;
 	static std::vector<std::pair<float, float>> g_mouseQueue;
 
@@ -2056,7 +2057,6 @@ namespace
 	static HWND g_gtaWindow = nullptr;
 	// While a screen of Minecraft's own is open, the mouse steers its cursor instead of GTA's camera
 	static std::atomic<bool> g_mcScreen{false};
-	static int g_mouseLog = 0;
 
 	/// Minecraft's window, by the pid the mod reported with hello. Only local calls are used:
 	/// GetWindowTextW would send WM_GETTEXT to another process and wait, which can hang the caller.
