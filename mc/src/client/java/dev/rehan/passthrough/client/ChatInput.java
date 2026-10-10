@@ -1,11 +1,9 @@
 package dev.rehan.passthrough.client;
 
-import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
-
 /**
  * The host (GTA) types into a chat screen of ours.
  *
@@ -34,18 +32,25 @@ public final class ChatInput {
 		}
 	}
 
-	/** The keys a chat line cannot be written without. */
+	/** The keys a chat line cannot be written without. GLFW's own key codes, which never move. */
 	public static void special(final Minecraft minecraft, final String k) {
 		if (!(minecraft.gui.screen() instanceof ChatScreen chat)) {
 			return;
 		}
 
-		switch (k) {
-			case "enter" -> chat.keyPressed(new KeyEvent(InputConstants.KEY_ENTER, 0, 0));
-			case "back" -> chat.keyPressed(new KeyEvent(InputConstants.KEY_BACKSPACE, 0, 0));
-			case "escape" -> chat.onClose();
-			default -> {
-			}
+		final int key = switch (k) {
+			case "enter" -> 257;
+			case "back" -> 259;
+			default -> 0;
+		};
+		if (k.equals("escape")) {
+			chat.onClose();
+			return;
 		}
+		if (key == 0) {
+			return;
+		}
+
+		chat.keyPressed(new KeyEvent(key, 0, 0));
 	}
 }
