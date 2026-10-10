@@ -1980,7 +1980,7 @@ namespace
 	static HWND g_gtaWindow = nullptr;
 	// While a screen of Minecraft's own is open, the mouse steers its cursor instead of GTA's camera
 	static std::atomic<bool> g_mcScreen{false};
-	static std::atomic<bool> g_mouseSink{false};
+	static int g_mouseLog = 0;
 
 	/// Minecraft's window, by the pid the mod reported with hello. Only local calls are used:
 	/// GetWindowTextW would send WM_GETTEXT to another process and wait, which can hang the caller.
@@ -2173,11 +2173,6 @@ namespace
 			// overlay) becomes usable
 			g_mcScreen = json_value(message, "open") != nullptr && std::strncmp(json_value(message, "open"), "true", 4) == 0;
 			dbg("screen open=%d", (int)g_mcScreen);
-			return;
-		}
-		if (type == "mouseack")
-		{
-			g_mouseSink = json_value(message, "ok") != nullptr && std::strncmp(json_value(message, "ok"), "true", 4) == 0;
 			return;
 		}
 		if (type == "chatopen")
@@ -2493,11 +2488,14 @@ namespace
 		{
 			natives::DisableControlAction(0, 1, TRUE);
 			natives::DisableControlAction(0, 2, TRUE);
-			if (g_mouseSink)
+			// the look controls are read while disabled, which is exactly what they are for: the host's
+			// own camera never sees this movement
+			const float dx = natives::GetDisabledControlNormal(0, 1), dy = natives::GetDisabledControlNormal(0, 2);
+			if (dx != 0.0f || dy != 0.0f)
 			{
-				const float dx = natives::GetDisabledControlNormal(0, 1), dy = natives::GetDisabledControlNormal(0, 2);
-				if (dx != 0.0f || dy != 0.0f)
-					sendf("{\"t\":\"mouse\",\"dx\":%.5f,\"dy\":%.5f}", dx, dy);
+				sendf("{\"t\":\"mouse\",\"dx\":%.5f,\"dy\":%.5f}", dx, dy);
+				if (++g_mouseLog <= 6)
+					dbg("mouse dx=%.5f dy=%.5f", dx, dy);
 			}
 		}
 		// the hook only ever feeds us while the script is alive and the link is up, so it cannot outlive

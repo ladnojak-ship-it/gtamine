@@ -1,5 +1,6 @@
 package dev.rehan.passthrough.client;
 
+import dev.rehan.passthrough.Passthrough;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -20,6 +21,16 @@ public final class ScreenInput {
 
 	private static double x, y;
 	private static boolean inScreen;
+	static int mouseLog;
+
+	/** Where the cursor is now, in GUI-scaled pixels: for the log, so a stuck cursor is visible. */
+	public static double cursorX() {
+		return x;
+	}
+
+	public static double cursorY() {
+		return y;
+	}
 
 	/** A cursor is only steered while a screen is open and it still wants pointer input. */
 	public static boolean wantsCursor() {
