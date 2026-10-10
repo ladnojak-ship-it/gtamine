@@ -1836,12 +1836,69 @@ namespace
 	}
 
 	/// Messages from Minecraft: explosions become GTA explosions at the same spot; director commands.
+	/// One log line next to the game, so a focus or link problem can be traced after the fact.
+	void dbg(const char *fmt, ...)
+	{
+		static char path[MAX_PATH] = {};
+		if (path[0] == 0)
+		{
+			GetModuleFileNameA(nullptr, path, MAX_PATH);
+			if (char *slash = strrchr(path, '\\'))
+				strcpy_s(slash + 1, MAX_PATH - (slash + 1 - path), "MCPassthroughDebug.log");
+			else
+				return;
+		}
+		char line[512];
+		va_list args;
+		va_start(args, fmt);
+		vsnprintf(line, sizeof(line), fmt, args);
+		va_end(args);
+		if (FILE *f = fopen(path, "a"))
+		{
+			fprintf(f, "[%u] %s\n", natives::GetGameTimer(), line);
+			fclose(f);
+		}
+	}
+
 	// --- Focus swapping. Minecraft's own screens (inventory, chests, chat) need the keyboard and the
 	// mouse, which only the focused window receives. Minecraft renders unfocused and never pauses, so
 	// moving the focus there and back is safe and the passthrough keeps running while it is open.
 	static DWORD g_mcPid = 0;
 	static HWND g_mcWindow = nullptr;
 	static HWND g_gtaWindow = nullptr;
+
+	/// Minecraft's window: the pid the mod reported with hello first, then its title as a backstop, in case
+	/// the pid never arrived (a launcher that re-execs) or the window was recreated.
+	static HWND mc_window()
+	{
+		if (g_mcWindow && IsWindow(g_mcWindow))
+			return g_mcWindow;
+		struct Find
+		{
+			DWORD pid;
+			HWND byPid;
+			HWND byTitle;
+		};
+		Find find{g_mcPid, nullptr, nullptr};
+		EnumWindows([](HWND w, LPARAM lp) -> BOOL {
+			Find *f = reinterpret_cast<Find *>(lp);
+			if (!IsWindowVisible(w) || GetWindow(w, GW_OWNER) != nullptr)
+				return TRUE;
+			wchar_t title[256] = {};
+			if (GetWindowTextW(w, title, 256) >= 9 && wcsncmp(title, L"Minecraft", 9) == 0 && f->byTitle == nullptr)
+				f->byTitle = w;
+			if (f->pid != 0 && f->byPid == nullptr)
+			{
+				DWORD owner = 0;
+				GetWindowThreadProcessId(w, &owner);
+				if (owner == f->pid)
+					f->byPid = w;
+			}
+			return TRUE;
+		}, reinterpret_cast<LPARAM>(&find));
+		g_mcWindow = find.byPid ? find.byPid : find.byTitle;
+		return g_mcWindow;
+	}
 
 	static HWND top_window_of_pid(const DWORD pid)
 	{
@@ -1853,9 +1910,11 @@ namespace
 		Find find{pid, nullptr};
 		EnumWindows([](HWND w, LPARAM lp) -> BOOL {
 			Find *f = reinterpret_cast<Find *>(lp);
+			if (f->found || !IsWindowVisible(w) || GetWindow(w, GW_OWNER) != nullptr)
+				return TRUE;
 			DWORD owner = 0;
 			GetWindowThreadProcessId(w, &owner);
-			if (owner == f->pid && IsWindowVisible(w) && GetWindow(w, GW_OWNER) == nullptr)
+			if (owner == f->pid)
 			{
 				f->found = w;
 				return FALSE;
@@ -1863,6 +1922,14 @@ namespace
 			return TRUE;
 		}, reinterpret_cast<LPARAM>(&find));
 		return find.found;
+	}
+
+	static HWND gta_window()
+	{
+		if (g_gtaWindow && IsWindow(g_gtaWindow))
+			return g_gtaWindow;
+		g_gtaWindow = top_window_of_pid(GetCurrentProcessId());
+		return g_gtaWindow;
 	}
 
 	/// Give the foreground window to hwnd. Windows only lets the *foreground* process raise a window, and
@@ -1892,34 +1959,37 @@ namespace
 		SetFocus(hwnd);
 		if (attached)
 			AttachThreadInput(thisThread, targetThread, FALSE);
+		dbg("raise_window hwnd=%p foreground=%d active=%d", (void *)hwnd, (int)(GetForegroundWindow() == hwnd), (int)(GetActiveWindow() == hwnd));
 	}
 
 	void mc_focus(const bool on)
 	{
 		if (on)
 		{
-			if (!g_mcPid)
+			dbg("focus on requested (pid=%lu)", (unsigned long)g_mcPid);
+			if (!g_mcPid && g_mcWindow == nullptr)
+				dbg("  no pid yet: falling back to the window title");
+			const HWND w = mc_window();
+			if (!w)
 			{
-				natives::Notify("Passthrough: ~r~no Minecraft pid yet");
-				return;
-			}
-			if (!g_mcWindow || !IsWindow(g_mcWindow))
-				g_mcWindow = top_window_of_pid(g_mcPid);
-			if (!g_mcWindow)
-			{
+				dbg("  FAILED: Minecraft window not found");
 				natives::Notify("Passthrough: ~r~Minecraft window not found");
 				return;
 			}
-			raise_window(g_mcWindow);
+			dbg("  window %p found, raising", (void *)w);
+			raise_window(w);
 			natives::Notify("Passthrough: Minecraft ~g~focus");
 		}
 		else
 		{
-			if (!g_gtaWindow || !IsWindow(g_gtaWindow))
-				g_gtaWindow = top_window_of_pid(GetCurrentProcessId());
-			if (!g_gtaWindow)
+			dbg("focus off requested");
+			const HWND w = gta_window();
+			if (!w)
+			{
+				dbg("  FAILED: GTA window not found");
 				return;
-			raise_window(g_gtaWindow);
+			}
+			raise_window(w);
 			natives::Notify("Passthrough: GTA ~g~focus");
 		}
 	}

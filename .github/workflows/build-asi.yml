@@ -79,6 +79,14 @@ jobs:
           name: mc-passthrough-asi
           path: gta/build/MCPassthrough.asi
 
+      # the shader's defaults are tuned per machine (edge softness, reprojection, depth bias), so it ships
+      # next to the plugin and is installed with it - never edited in place in the game folder
+      - name: Upload the effect shader
+        uses: actions/upload-artifact@v4
+        with:
+          name: mc-passthrough-shader
+          path: gta/shaders/MCPassthrough.fx
+
       - name: Upload ScriptHookV runtime
         uses: actions/upload-artifact@v4
         with:
