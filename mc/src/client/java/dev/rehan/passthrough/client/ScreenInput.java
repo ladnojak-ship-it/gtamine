@@ -21,7 +21,7 @@ public final class ScreenInput {
 
 	private static double x, y;
 	private static boolean inScreen;
-	static int mouseLog;
+	static int mouseLog = 0;
 
 	/** Where the cursor is now, in GUI-scaled pixels: for the log, so a stuck cursor is visible. */
 	public static double cursorX() {

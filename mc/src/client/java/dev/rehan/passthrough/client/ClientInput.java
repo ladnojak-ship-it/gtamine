@@ -20,10 +20,11 @@ final class ClientInput {
 		switch (m.get("t").getAsString()) {
 			// the host's mouse, forwarded because a screen of our own is open over its picture
 			case "mouse" -> {
-				ScreenInput.move(minecraft, m.get("dx").getAsDouble() * 800.0, m.get("dy").getAsDouble() * 800.0);
-				if (ClientInput.mouseLog < 6) {
-					ClientInput.mouseLog++;
-					Passthrough.LOG.info("mouse dx={} dy={} -> {},{}", m.get("dx").getAsDouble(), m.get("dy").getAsDouble(), ScreenInput.cursorX(), ScreenInput.cursorY());
+				final double dx = m.get("dx").getAsDouble(), dy = m.get("dy").getAsDouble();
+				ScreenInput.move(minecraft, dx * 800.0, dy * 800.0);
+				if (ScreenInput.mouseLog < 6) {
+					ScreenInput.mouseLog++;
+					Passthrough.LOG.info("mouse dx={} dy={} -> {},{}", dx, dy, ScreenInput.cursorX(), ScreenInput.cursorY());
 				}
 			}
 			// the host's keyboard, forwarded because its chat is open: real commands are typed in
