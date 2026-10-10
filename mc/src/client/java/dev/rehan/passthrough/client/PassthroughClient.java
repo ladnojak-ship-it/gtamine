@@ -149,6 +149,7 @@ public class PassthroughClient implements ClientModInitializer {
 		final boolean open = minecraft.gui.screen() != null;
 		if (open != screenOpen) {
 			screenOpen = open;
+			Passthrough.LOG.info("focus {}, screen {}", open ? "on" : "off", minecraft.gui.screen());
 			Passthrough.events.accept(open ? "{\"t\":\"focus\",\"on\":true}" : "{\"t\":\"focus\",\"on\":false}");
 		}
 

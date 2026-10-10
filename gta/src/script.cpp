@@ -1865,23 +1865,59 @@ namespace
 		return find.found;
 	}
 
+	/// Give the foreground window to hwnd. Windows only lets the *foreground* process raise a window, and
+	/// even then it can refuse: attaching to the target's input thread first is what makes it reliable.
+	static void raise_window(const HWND hwnd)
+	{
+		if (!hwnd || !IsWindow(hwnd))
+			return;
+		ShowWindow(hwnd, SW_RESTORE);
+		BringWindowToTop(hwnd);
+		DWORD targetThread = GetWindowThreadProcessId(hwnd, nullptr);
+		DWORD thisThread = GetCurrentThreadId();
+		bool attached = false;
+		if (targetThread && targetThread != thisThread)
+			attached = AttachThreadInput(thisThread, targetThread, TRUE) != FALSE;
+		if (!SetForegroundWindow(hwnd) && HMODULE user32 = GetModuleHandleW(L"user32.dll"))
+		{
+			// last resort: the undocumented call Alt-Tab itself makes, which ignores the foreground lock
+			using SwitchToThisWindowFn = void (WINAPI *)(HWND, BOOL);
+			if (auto switchTo = reinterpret_cast<SwitchToThisWindowFn>(GetProcAddress(user32, "SwitchToThisWindow")))
+				switchTo(hwnd, TRUE);
+		}
+		SetActiveWindow(hwnd);
+		SetFocus(hwnd);
+		if (attached)
+			AttachThreadInput(thisThread, targetThread, FALSE);
+	}
+
 	void mc_focus(const bool on)
 	{
 		if (on)
 		{
 			if (!g_mcPid)
+			{
+				natives::Notify("Passthrough: ~r~no Minecraft pid yet");
 				return;
-			if (!g_mcWindow)
+			}
+			if (!g_mcWindow || !IsWindow(g_mcWindow))
 				g_mcWindow = top_window_of_pid(g_mcPid);
-			if (g_mcWindow)
-				SetForegroundWindow(g_mcWindow);
+			if (!g_mcWindow)
+			{
+				natives::Notify("Passthrough: ~r~Minecraft window not found");
+				return;
+			}
+			raise_window(g_mcWindow);
+			natives::Notify("Passthrough: Minecraft ~g~focus");
 		}
 		else
 		{
-			if (!g_gtaWindow)
+			if (!g_gtaWindow || !IsWindow(g_gtaWindow))
 				g_gtaWindow = top_window_of_pid(GetCurrentProcessId());
-			if (g_gtaWindow)
-				SetForegroundWindow(g_gtaWindow);
+			if (!g_gtaWindow)
+				return;
+			raise_window(g_gtaWindow);
+			natives::Notify("Passthrough: GTA ~g~focus");
 		}
 	}
 
@@ -2173,6 +2209,24 @@ namespace
 				props_clear_all();
 				g_ws.send("{\"t\":\"blocksync\",\"r\":64}");
 			}
+		}
+
+		// F6 arms Minecraft-driven flight: Space (GTA's jump) or a fall off anything tall then opens the
+		// elytra, and the mouse steers it. Pressing it again puts flight away and lands.
+		{
+			static bool armed = false;
+			static bool f6Down = false;
+			const bool f6 = (GetAsyncKeyState(VK_F6) & 0x8000) != 0;
+			if (f6 && !f6Down)
+			{
+				armed = !armed;
+				handle_director(armed ? "{\"t\":\"gta\",\"op\":\"armdrive\",\"user\":1,\"on\":1}"
+				                      : "{\"t\":\"gta\",\"op\":\"armdrive\",\"user\":1,\"on\":0}");
+				if (!armed && g_drive.on)
+					drive_set(ped, false);
+				natives::Notify(armed ? "Elytra ~g~armed: Space to take off" : "Elytra ~r~put away");
+			}
+			f6Down = f6;
 		}
 
 		// the player's take-off: Space (jump) while armed, or a real fall off something tall
