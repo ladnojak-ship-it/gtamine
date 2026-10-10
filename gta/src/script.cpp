@@ -2499,18 +2499,6 @@ namespace
 			f6Down = f6;
 		}
 
-		// G: a wave of hostile mobs on the ground around Steve, so the host's people have something to fight
-		{
-			static bool gDown = false;
-			const bool g = (GetAsyncKeyState(0x47) & 0x8000) != 0;
-			if (g && !gDown)
-			{
-				sendf("{\"t\":\"spawnmobs\",\"k\":\"zombie\",\"n\":5,\"rmin\":8,\"rmax\":16,\"arc\":40,\"yaw\":0}");
-				natives::Notify("Mob ~g~wave");
-			}
-			gDown = g;
-		}
-
 		// a screen of Minecraft's own is open: its picture is already drawn over GTA's as the overlay,
 		// so only the cursor is missing. The host's look, movement and firing stand down for as long as
 		// it is open, so the mouse steers the cursor and the keys are typed rather than played
