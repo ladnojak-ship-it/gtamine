@@ -3,9 +3,11 @@ package dev.rehan.passthrough.client;
 import dev.rehan.passthrough.Passthrough;
 import dev.rehan.passthrough.WorldBridge;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.client.CloudStatus;
@@ -76,6 +78,7 @@ public class PassthroughClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		HostLink.launch();
 		ClientTickEvents.END_CLIENT_TICK.register(PassthroughClient::tick);
+		ClientSendMessageEvents.ALLOW_CHAT.register(PassthroughClient::onChat);
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
 			ServerPlayer player = handler.player;
 			// never left gliding from a previous session: with no host yet it would glide down into the void
@@ -90,6 +93,46 @@ public class PassthroughClient implements ClientModInitializer {
 				SETUP.forEach(WorldBridge::command);
 			}
 		});
+	}
+
+	/**
+	 * Chat drives GTA. "!&lt;op&gt; [json]" runs one host op, the same ones the director uses:
+	 * <pre>
+	 *   !teleport {"x":100,"y":-200,"z":30}
+	 *   !explode {"x":100,"y":-200,"z":30,"type":5,"scale":1}
+	 *   !time {"h":22}
+	 *   !weather "CLEAR"
+	 *   !cops {"stars":3}
+	 *   !drive {"user":1}
+	 * </pre>
+	 * The message is swallowed, so it never shows up in Minecraft's own chat log.
+	 */
+	private static boolean onChat(final String message) {
+		if (!message.startsWith("!"))
+			return true; // not ours: let it through
+		final String body = message.substring(1).trim();
+		if (body.isEmpty())
+			return false;
+		final int space = body.indexOf(' ');
+		final String op = space < 0 ? body : body.substring(0, space);
+		final String args = space < 0 ? "" : body.substring(space + 1).trim();
+		final String json = args.isEmpty()
+			? String.format(Locale.ROOT, "{\"t\":\"gta\",\"op\":\"%s\"}", escapeJson(op))
+			: String.format(Locale.ROOT, "{\"t\":\"gta\",\"op\":\"%s\",%s}", escapeJson(op), args);
+		Passthrough.LOG.info("chat op: {}", op);
+		Passthrough.events.accept(json);
+		return false;
+	}
+
+	private static String escapeJson(final String s) {
+		final StringBuilder b = new StringBuilder(s.length() + 8);
+		for (int i = 0; i < s.length(); ++i) {
+			final char c = s.charAt(i);
+			if (c == '"' || c == '\\')
+				b.append('\\');
+			b.append(c);
+		}
+		return b.toString();
 	}
 
 	private static void tick(final Minecraft minecraft) {

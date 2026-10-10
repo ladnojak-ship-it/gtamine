@@ -190,7 +190,7 @@ namespace
 		Vector3 mn = {}, mx = {};
 		std::map<std::tuple<int, int, int>, Object> live;
 		std::vector<std::tuple<int, int, int>> pending;
-		static constexpr size_t kMax = 800; // GTA crashes (access violation) with ~1500 script objects about; 800 leaves ~700 for mobs, peds and cars
+		static constexpr size_t kMax = 1100; // GTA crashes (access violation) with ~1500 script objects about; 1100 leaves the rest for mobs, peds and cars
 	} g_props;
 	void props_clear_all();
 	std::vector<std::pair<int, int>> g_spiral;
@@ -2208,6 +2208,41 @@ namespace
 				}
 				if (e)
 					natives::DisableControlAction(0, 23, TRUE);
+			}
+			// Q drops the held item. GTA's own cover binding is suppressed while it is held.
+			{
+				static bool qDown = false;
+				const bool q = (GetAsyncKeyState(0x51) & 0x8000) != 0;
+				if (q != qDown)
+				{
+					qDown = q;
+					sendf("{\"t\":\"key\",\"k\":\"drop\",\"down\":%s}", q ? "true" : "false");
+				}
+				if (q)
+					natives::DisableControlAction(0, 44, TRUE);
+			}
+			// B switches the block props between hidden (clean) and faded, so a build casts GTA shadows
+			{
+				static bool bDown = false;
+				const bool b = (GetAsyncKeyState(0x42) & 0x8000) != 0;
+				if (b && !bDown)
+				{
+					g_props.visible = !g_props.visible;
+					g_props.alpha = g_props.visible ? 110 : 255;
+					for (auto &kv : g_props.live)
+						if (natives::DoesEntityExist(kv.second))
+						{
+							if (!g_props.visible)
+								natives::SetEntityVisible(kv.second, FALSE, FALSE);
+							else
+							{
+								natives::SetEntityVisible(kv.second, TRUE, FALSE);
+								natives::SetEntityAlpha(kv.second, g_props.alpha);
+							}
+						}
+					natives::Notify(g_props.visible ? "Block props: ~y~casting shadows" : "Block props: ~g~hidden");
+				}
+				bDown = b;
 			}
 		}
 		aim_cam_tick(gun && natives::IsPlayerFreeAiming(natives::PlayerId()));
