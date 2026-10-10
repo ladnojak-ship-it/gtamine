@@ -14,28 +14,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ScriptHookV's SDK and ReShade's headers are fetched from their own sites (not redistributed here),
+      # so they are cached: a build only downloads what it does not already have.
+      - name: Cache third_party
+        uses: actions/cache@v4
+        with:
+          path: gta/third_party
+          key: third-party-${{ hashFiles('gta/fetch_deps.sh') }}
+
       - name: Fetch ScriptHookV SDK
         shell: bash
         run: |
           mkdir -p gta/third_party/shv gta/third_party/reshade gta/third_party/runtime
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          TMP=$(mktemp -d)
-          curl -fsSL -A "$UA" -H "Accept: text/html" https://www.dev-c.com/gtav/scripthookv/ -o "$TMP/shv.html"
-          for f in $(grep -o '/files/ScriptHookV_[^"]*\.zip' "$TMP/shv.html" | sort -u); do
-            curl -fsSL -A "$UA" -H "Referer: https://www.dev-c.com/gtav/scripthookv/" "https://www.dev-c.com$f" -o "$TMP/$(basename $f)"
-          done
-          ls "$TMP"/ScriptHookV_SDK_*.zip || { echo "No SDK found"; exit 1; }
-          unzip -qo "$TMP"/ScriptHookV_SDK_*.zip -d "$TMP/sdk"
-          cp "$TMP"/sdk/inc/main.h "$TMP"/sdk/inc/nativeCaller.h "$TMP"/sdk/inc/types.h "$TMP"/sdk/lib/ScriptHookV.lib gta/third_party/shv/
-          unzip -qo "$(ls "$TMP"/ScriptHookV_*.zip | grep -v SDK)" -d "$TMP/rt"
-          cp "$TMP"/rt/bin/ScriptHookV.dll "$TMP"/rt/bin/dinput8.dll gta/third_party/runtime/
+          # dev-c.com drops connections now and then: retry before giving up
+          RETRY="--retry 6 --retry-delay 10 --retry-all-errors --connect-timeout 30"
+          if [ -f gta/third_party/shv/ScriptHookV.lib ] && [ -f gta/third_party/runtime/ScriptHookV.dll ]; then
+            echo "ScriptHookV already cached"
+          else
+            TMP=$(mktemp -d)
+            curl -fsSL $RETRY -A "$UA" -H "Accept: text/html" https://www.dev-c.com/gtav/scripthookv/ -o "$TMP/shv.html"
+            for f in $(grep -o '/files/ScriptHookV_[^"]*\.zip' "$TMP/shv.html" | sort -u); do
+              curl -fsSL $RETRY -A "$UA" -H "Referer: https://www.dev-c.com/gtav/scripthookv/" "https://www.dev-c.com$f" -o "$TMP/$(basename $f)"
+            done
+            ls "$TMP"/ScriptHookV_SDK_*.zip >/dev/null 2>&1 || { echo "No SDK found"; exit 1; }
+            unzip -qo "$TMP"/ScriptHookV_SDK_*.zip -d "$TMP/sdk"
+            cp "$TMP"/sdk/inc/main.h "$TMP"/sdk/inc/nativeCaller.h "$TMP"/sdk/inc/types.h "$TMP"/sdk/lib/ScriptHookV.lib gta/third_party/shv/
+            unzip -qo "$(ls "$TMP"/ScriptHookV_*.zip | grep -v SDK)" -d "$TMP/rt"
+            cp "$TMP"/rt/bin/ScriptHookV.dll "$TMP"/rt/bin/dinput8.dll gta/third_party/runtime/
+          fi
 
       - name: Fetch ReShade
         shell: bash
         run: |
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
           TMP=$(mktemp -d)
-          curl -fsSL -A "$UA" -H "Referer: https://reshade.me/" "https://reshade.me/downloads/ReShade_Setup_${{ env.RESHADE_VERSION }}_Addon.exe" -o "$TMP/reshade.exe"
+          RETRY="--retry 6 --retry-delay 10 --retry-all-errors --connect-timeout 30"
+          curl -fsSL $RETRY -A "$UA" -H "Referer: https://reshade.me/" "https://reshade.me/downloads/ReShade_Setup_${{ env.RESHADE_VERSION }}_Addon.exe" -o "$TMP/reshade.exe"
           unzip -qo "$TMP/reshade.exe" ReShade64.dll -d "$TMP" 2>/dev/null || true
           cp "$TMP/ReShade64.dll" gta/third_party/runtime/
           for f in reshade.hpp reshade_api.hpp reshade_api_device.hpp reshade_api_pipeline.hpp reshade_api_resource.hpp reshade_api_format.hpp reshade_events.hpp reshade_overlay.hpp; do
