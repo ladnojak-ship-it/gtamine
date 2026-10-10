@@ -135,11 +135,21 @@ public class PassthroughClient implements ClientModInitializer {
 		return b.toString();
 	}
 
+	private static boolean screenOpen = false;
+
 	private static void tick(final Minecraft minecraft) {
 		// a death (the void) would leave the death screen over the host's picture: respawn straight away
 		if (minecraft.player != null && minecraft.gui.screen() instanceof DeathScreen && --respawnIn <= 0) {
 			respawnIn = 40;
 			minecraft.player.respawn();
+		}
+
+		// a screen (inventory, chest, chat) needs the keyboard and the mouse, which only the focused
+		// window gets: hand the focus over for as long as one is open, and take it back when it closes
+		final boolean open = minecraft.gui.screen() != null;
+		if (open != screenOpen) {
+			screenOpen = open;
+			Passthrough.events.accept(open ? "{\"t\":\"focus\",\"on\":true}" : "{\"t\":\"focus\",\"on\":false}");
 		}
 
 		if (!configured) {

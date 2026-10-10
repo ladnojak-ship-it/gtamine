@@ -1836,9 +1836,72 @@ namespace
 	}
 
 	/// Messages from Minecraft: explosions become GTA explosions at the same spot; director commands.
+	// --- Focus swapping. Minecraft's own screens (inventory, chests, chat) need the keyboard and the
+	// mouse, which only the focused window receives. Minecraft renders unfocused and never pauses, so
+	// moving the focus there and back is safe and the passthrough keeps running while it is open.
+	static DWORD g_mcPid = 0;
+	static HWND g_mcWindow = nullptr;
+	static HWND g_gtaWindow = nullptr;
+
+	static HWND top_window_of_pid(const DWORD pid)
+	{
+		struct Find
+		{
+			DWORD pid;
+			HWND found;
+		};
+		Find find{pid, nullptr};
+		EnumWindows([](HWND w, LPARAM lp) -> BOOL {
+			Find *f = reinterpret_cast<Find *>(lp);
+			DWORD owner = 0;
+			GetWindowThreadProcessId(w, &owner);
+			if (owner == f->pid && IsWindowVisible(w) && GetWindow(w, GW_OWNER) == nullptr)
+			{
+				f->found = w;
+				return FALSE;
+			}
+			return TRUE;
+		}, reinterpret_cast<LPARAM>(&find));
+		return find.found;
+	}
+
+	void mc_focus(const bool on)
+	{
+		if (on)
+		{
+			if (!g_mcPid)
+				return;
+			if (!g_mcWindow)
+				g_mcWindow = top_window_of_pid(g_mcPid);
+			if (g_mcWindow)
+				SetForegroundWindow(g_mcWindow);
+		}
+		else
+		{
+			if (!g_gtaWindow)
+				g_gtaWindow = top_window_of_pid(GetCurrentProcessId());
+			if (g_gtaWindow)
+				SetForegroundWindow(g_gtaWindow);
+		}
+	}
+
 	void handle_event(const std::string &message)
 	{
 		const std::string type = json_str(message, "t");
+		if (type == "hello")
+		{
+			// the mod tells us its pid, so its window can be found when it needs the focus
+			const char *p = json_value(message, "pid");
+			if (p)
+				g_mcPid = DWORD(std::atoi(p));
+			return;
+		}
+		if (type == "focus")
+		{
+			const char *on = json_value(message, "on");
+			mc_focus(on != nullptr && std::strncmp(on, "true", 4) == 0);
+			return;
+		}
 		if (type == "gta")
 		{
 			handle_director(message);
@@ -2220,6 +2283,17 @@ namespace
 				}
 				if (q)
 					natives::DisableControlAction(0, 44, TRUE);
+			}
+			// T opens Minecraft's chat: from there real Minecraft commands (/give, /tp) work, because
+			// the mod hands the focus to Minecraft while a screen of its own is open.
+			{
+				static bool tDown = false;
+				const bool t = (GetAsyncKeyState(0x54) & 0x8000) != 0;
+				if (t != tDown)
+				{
+					tDown = t;
+					sendf("{\"t\":\"key\",\"k\":\"chat\",\"down\":%s}", t ? "true" : "false");
+				}
 			}
 			// B switches the block props between hidden (clean) and faded, so a build casts GTA shadows
 			{

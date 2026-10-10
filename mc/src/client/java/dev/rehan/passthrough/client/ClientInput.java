@@ -34,6 +34,7 @@ final class ClientInput {
 					case "attack" -> minecraft.options.keyAttack;
 					case "pick" -> minecraft.options.keyPickItem;
 					case "inventory" -> minecraft.options.keyInventory;
+					case "chat" -> minecraft.options.keyChat;
 					case "drop" -> minecraft.options.keyDrop;
 					case "swap" -> minecraft.options.keySwapOffhand;
 					default -> null;
