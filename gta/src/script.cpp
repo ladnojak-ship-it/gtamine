@@ -1871,9 +1871,6 @@ namespace
 		int len = 0;
 		char text[8] = {};
 	};
-	static HHOOK g_chatHook = nullptr;
-	static DWORD g_hookFed = 0;
-	static int g_keyLog = 0;
 	static std::mutex g_chatMutex;
 	static std::vector<ChatKey> g_chatQueue;
 
@@ -1899,120 +1896,32 @@ namespace
 		return 0;
 	}
 
-	static LRESULT CALLBACK chat_keyboard_proc(const int code, const WPARAM wParam, const LPARAM lParam)
-	{
-		if (code != HC_ACTION || g_chatHook == nullptr || GetTickCount() - g_hookFed > 4000)
-			return CallNextHookEx(nullptr, code, wParam, lParam);
-		if (wParam != WM_KEYDOWN && wParam != WM_SYSKEYDOWN)
-			return CallNextHookEx(nullptr, code, wParam, lParam);
-		const auto *kb = reinterpret_cast<const KBDLLHOOKSTRUCT *>(lParam);
-		if (++g_keyLog <= 20)
-			dbg("hook key vk=%u scan=%u flags=%u", (unsigned)kb->vkCode, (unsigned)kb->scanCode, (unsigned)kb->flags);
-		ChatKey key;
-		key.vk = kb->vkCode;
-		if (key.vk != VK_RETURN && key.vk != VK_BACK && key.vk != VK_ESCAPE)
-		{
-			const int c = vk_to_char(kb->vkCode, kb->scanCode);
-			if (c == 0)
-				return CallNextHookEx(nullptr, code, wParam, lParam); // not text: leave it to the game
-			key.text[0] = (char)(c < 128 ? c : '?');
-			key.len = 1;
-		}
-		{
-			std::lock_guard<std::mutex> lock(g_chatMutex);
-			if (g_chatQueue.size() >= 64)
-				return CallNextHookEx(nullptr, code, wParam, lParam); // full: let the game have it
-			g_chatQueue.push_back(key);
-		}
-		return 1; // swallowed: the game must not act on it
-	}
-
-	// The host's mouse while a screen of Minecraft's own is open. GTA's own look stands down, so the
-	// movement is read straight from the OS through a low-level hook - not from GTA's input system, which
-	// reports nothing once the control is disabled. The hook lives only while a screen is open and stands
-	// down if the script stops feeding it, exactly like the keyboard one.
-	static HHOOK g_mouseHook = nullptr;
+	// The host's mouse while a screen of Minecraft's own is open.
 	static POINT g_lastCursor = {LONG_MIN, 0};
 	static int g_mouseLog = 0;
-	static std::mutex g_mouseMutex;
-	static std::vector<std::pair<float, float>> g_mouseQueue;
 
-	static LRESULT CALLBACK mouse_move_proc(const int code, const WPARAM wParam, const LPARAM lParam)
-	{
-		if (code != HC_ACTION || g_mouseHook == nullptr || GetTickCount() - g_hookFed > 4000)
-			return CallNextHookEx(nullptr, code, wParam, lParam);
-		if (wParam == WM_MOUSEMOVE)
-		{
-			const auto *ms = reinterpret_cast<const MSLLHOOKSTRUCT *>(lParam);
-			if (g_lastCursor.x != LONG_MIN)
-			{
-				const int dx = ms->pt.x - g_lastCursor.x, dy = ms->pt.y - g_lastCursor.y;
-				if (dx != 0 || dy != 0)
-				{
-					std::lock_guard<std::mutex> lock(g_mouseMutex);
-					if (g_mouseQueue.size() < 64)
-						g_mouseQueue.emplace_back(float(dx), float(dy));
-				}
-			}
-			g_lastCursor = ms->pt;
-		}
-		return CallNextHookEx(nullptr, code, wParam, lParam);
-	}
-
-	static void mouse_hook(const bool on)
-	{
-		if (on && g_mouseHook == nullptr)
-		{
-			g_lastCursor.x = LONG_MIN;
-			g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, mouse_move_proc, GetModuleHandleW(nullptr), 0);
-			g_hookFed = GetTickCount();
-			dbg("mouse hook installed: %p", (void *)g_mouseHook);
-		}
-		else if (!on && g_mouseHook != nullptr)
-		{
-			UnhookWindowsHookEx(g_mouseHook);
-			g_mouseHook = nullptr;
-			std::lock_guard<std::mutex> lock(g_mouseMutex);
-			g_mouseQueue.clear();
-			dbg("mouse hook removed");
-		}
-	}
-
-	/// Send what the mouse hook queued. Called from the script thread, never from the hook itself.
+	/// The host's mouse while a screen of Minecraft's own is open. GTA's own look controls are disabled
+	/// then, so the OS cursor position is the only thing that moves: read it directly, no hook needed (a
+	/// hook installed from the script thread has no message loop to run on and is never called).
 	void mouse_tick()
 	{
-		std::vector<std::pair<float, float>> pending;
+		POINT cur = {};
+		if (!GetCursorPos(&cur))
+			return;
+		if (g_lastCursor.x != LONG_MIN)
 		{
-			std::lock_guard<std::mutex> lock(g_mouseMutex);
-			pending.swap(g_mouseQueue);
+			const int dx = cur.x - g_lastCursor.x, dy = cur.y - g_lastCursor.y;
+			if (dx != 0 || dy != 0)
+			{
+				sendf("{\"t\":\"mouse\",\"dx\":%.5f,\"dy\":%.5f}", double(dx), double(dy));
+				if (++g_mouseLog <= 8)
+					dbg("mouse dx=%d dy=%d", dx, dy);
+			}
 		}
-		for (const auto &move : pending)
-		{
-			sendf("{\"t\":\"mouse\",\"dx\":%.5f,\"dy\":%.5f}", move.first, move.second);
-			if (++g_mouseLog <= 8)
-				dbg("mouse dx=%.2f dy=%.2f", move.first, move.second);
-		}
+		g_lastCursor = cur;
 	}
 
-	static void chat_hook(const bool on)
-	{
-		if (on && g_chatHook == nullptr)
-		{
-			g_chatHook = SetWindowsHookExW(WH_KEYBOARD_LL, chat_keyboard_proc, GetModuleHandleW(nullptr), 0);
-			g_hookFed = GetTickCount();
-			dbg("keyboard hook installed: %p", (void *)g_chatHook);
-		}
-		else if (!on && g_chatHook != nullptr)
-		{
-			UnhookWindowsHookEx(g_chatHook);
-			g_chatHook = nullptr;
-			std::lock_guard<std::mutex> lock(g_chatMutex);
-			g_chatQueue.clear();
-			dbg("keyboard hook removed");
-		}
-	}
-
-	/// Send what the hook queued. Called from the script thread, never from the hook itself.
+	/// Send what the game's own keyboard callback queued. Runs on the script thread, never in the callback.
 	void chat_tick()
 	{
 		std::vector<ChatKey> pending;
@@ -2059,8 +1968,10 @@ namespace
 	static DWORD g_mcPid = 0;
 	static HWND g_mcWindow = nullptr;
 	static HWND g_gtaWindow = nullptr;
-	// While a screen of Minecraft's own is open, the mouse steers its cursor instead of GTA's camera
+	// While a screen of Minecraft's own is open, the mouse steers its cursor instead of GTA's camera;
+	// g_chatOpen is that for the keyboard, because the chat is the one screen that wants it.
 	static std::atomic<bool> g_mcScreen{false};
+	static std::atomic<bool> g_chatOpen{false};
 
 	/// Minecraft's window, by the pid the mod reported with hello. Only local calls are used:
 	/// GetWindowTextW would send WM_GETTEXT to another process and wait, which can hang the caller.
@@ -2252,22 +2163,13 @@ namespace
 			// thing missing is the cursor - and the keyboard, for the chat one
 			g_mcScreen = json_value(message, "open") != nullptr && std::strncmp(json_value(message, "open"), "true", 4) == 0;
 			dbg("screen open=%d", (int)g_mcScreen);
-			// the host's own look stands down while a screen is open, so the camera does not spin while
-			// the cursor is being steered
-			if (g_mcScreen)
-			{
-				natives::DisableControlAction(0, 1, TRUE);
-				natives::DisableControlAction(0, 2, TRUE);
-				mouse_hook(g_mcScreen);
-			}
-			else
-				mouse_hook(false);
 			return;
 		}
 		if (type == "chatopen")
 		{
 			const char *on = json_value(message, "open");
-			chat_hook(on != nullptr && std::strncmp(on, "true", 4) == 0);
+			g_chatOpen = on != nullptr && std::strncmp(on, "true", 4) == 0;
+			dbg("chat open=%d", (int)g_chatOpen);
 			return;
 		}
 		if (type == "gta")
@@ -2576,38 +2478,25 @@ namespace
 			f6Down = f6;
 		}
 
-		// a screen of Minecraft's own is open (inventory, chest, chat): its picture is already drawn over
-		// GTA's as the overlay, so only the cursor is missing. GTA's look stands down and the mouse
-		// steers the cursor, which keeps the focus with GTA and its window untouched.
-		// while a screen of Minecraft's own is open, the host's own look stands down: the camera must not
-		// spin while the mouse is steering the cursor over the composited picture
+		// a screen of Minecraft's own is open: its picture is already drawn over GTA's as the overlay,
+		// so only the cursor is missing. The host's look, movement and firing stand down for as long as
+		// it is open, so the mouse steers the cursor and the keys are typed rather than played
 		if (g_mcScreen)
 		{
+			for (const int control : kDisabledControls)
+				natives::DisableControlAction(0, control, TRUE);
 			natives::DisableControlAction(0, 1, TRUE);
 			natives::DisableControlAction(0, 2, TRUE);
-		}
-
-		if (g_mouseHook != nullptr)
-		{
+			natives::DisableControlAction(0, 30, TRUE);
+			natives::DisableControlAction(0, 31, TRUE);
+			natives::DisableControlAction(0, 32, TRUE);
+			natives::DisableControlAction(0, 33, TRUE);
+			natives::DisableControlAction(0, 22, TRUE);
 			if (g_ws.connected())
 			{
-				g_hookFed = GetTickCount();
 				mouse_tick();
-			}
-			else
-				mouse_hook(false);
-		}
-		// the hook only ever feeds us while the script is alive and the link is up, so it cannot outlive
-		// a session and swallow keys nobody is reading
-		if (g_chatHook != nullptr)
-		{
-			if (g_ws.connected())
-			{
-				g_hookFed = GetTickCount();
 				chat_tick();
 			}
-			else
-				chat_hook(false);
 		}
 
 		// the player's take-off: Space (jump) while armed, or a real fall off something tall
@@ -2799,14 +2688,42 @@ namespace
 		}
 	}
 
-	void on_keyboard(DWORD key, WORD, BYTE, BOOL, BOOL, BOOL wasDownBefore, BOOL isUpNow)
+	/// A key, typed while the host's keyboard is being typed for Minecraft's chat. ScriptHookV calls this on
+	/// the game's own message thread, so it comes with the real scan code the layout lookup needs - unlike a
+	/// low-level hook installed from the script thread, which never runs at all.
+	void on_keyboard(const DWORD key, const WORD, const BYTE scan, const BOOL, const BOOL altDown,
+		const BOOL wasDownBefore, const BOOL isUpNow)
 	{
 		if (isUpNow || wasDownBefore)
 			return;
 		if (key == VK_F7)
+		{
 			g_toggle = true;
-		else if (key == VK_F8)
+			return;
+		}
+		if (key == VK_F8)
+		{
 			g_relevel = true;
+			return;
+		}
+		if (!g_chatOpen)
+			return;
+
+		ChatKey chat;
+		chat.vk = key;
+		if (key != VK_RETURN && key != VK_BACK && key != VK_ESCAPE)
+		{
+			if (altDown || (GetAsyncKeyState(VK_CONTROL) & 0x8000))
+				return; // a shortcut, not text: leave it to the game
+			const int c = vk_to_char(key, scan);
+			if (c == 0)
+				return; // not text
+			chat.text[0] = (char)(c < 128 ? c : '?');
+			chat.len = 1;
+		}
+		std::lock_guard<std::mutex> lock(g_chatMutex);
+		if (g_chatQueue.size() < 64)
+			g_chatQueue.push_back(chat);
 	}
 }
 
