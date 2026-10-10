@@ -30,7 +30,7 @@ public final class ChatInput {
 		}
 
 		for (int i = 0; i < s.length(); ++i) {
-			chat.charTyped(new CharacterEvent(s.charAt(i), modifiers));
+			chat.charTyped(new CharacterEvent(s.codePointAt(i)));
 		}
 	}
 
