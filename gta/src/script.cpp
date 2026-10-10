@@ -32,6 +32,7 @@ namespace
 	constexpr int kGroundRadius = 40;        // blocks around the player that get collision
 	constexpr int kGroundProbesPerTick = 160;
 	constexpr int kGroundDepth = 2;          // barrier layers under each surface
+	constexpr float kWallProbeHeight = 8.0f; // how far up a column is probed for GTA's walls
 	constexpr Hash kWeaponUnarmed = 0xA2719263;
 	// Gun mode (Tab cycles): GTA's own weapons in Steve's hands. Carbine rifle, minigun, RPG.
 	constexpr Hash kGuns[] = {0x83BF0278, 0x42BF8A85, 0xB1CA77B1};
@@ -254,7 +255,7 @@ namespace
 			});
 		}
 		const int px = int(std::floor(player.x)), pz = int(std::floor(-player.y));
-		std::string columns;
+		std::string columns, walls;
 		int probes = 0;
 		for (const auto &[dx, dz] : g_spiral)
 		{
@@ -273,9 +274,29 @@ namespace
 			char entry[64];
 			snprintf(entry, sizeof(entry), "%s%d,%d,%d,%d", columns.empty() ? "" : ",", x, z, top - kGroundDepth + 1, top);
 			columns += entry;
+
+			// GTA's walls, steps and buildings. Only the floor was mirrored before, so Steve, the mobs and
+			// anything chasing a proxy walked straight through them: the ground probe starts at the player's
+			// head and never sees what stands on the column. Probing the same column higher up does, and
+			// the first surface found is whatever stands there.
+			float aboveZ = 0.0f;
+			if (natives::GetGroundZFor3dCoord(x + 0.5f, -(z + 0.5f), groundZ + kWallProbeHeight, &aboveZ, FALSE, FALSE)
+				&& aboveZ > groundZ + 0.7f && aboveZ - groundZ < kWallProbeHeight - 0.5f)
+			{
+				const int wTop = int(std::floor(aboveZ + g_yOffset + 0.5f)) - 1, wBottom = top + 1;
+				if (wTop >= wBottom)
+				{
+					char wall[64];
+					snprintf(wall, sizeof(wall), "%s%d,%d,%d,%d", walls.empty() ? "" : ",", x, z, wBottom, wTop);
+					walls += wall;
+				}
+			}
 		}
 		if (!columns.empty())
 			g_ws.send("{\"t\":\"ground\",\"c\":[" + columns + "]}");
+		// the same barrier message the ground uses: a wall is solid the same way, only taller
+		if (!walls.empty())
+			g_ws.send("{\"t\":\"walls\",\"c\":[" + walls + "]}");
 	}
 
 	// Flat JSON objects only (what the director and the mod send), with or without spaces around ':'.
@@ -2476,6 +2497,18 @@ namespace
 				natives::Notify(armed ? "Elytra ~g~armed: Space to take off" : "Elytra ~r~put away");
 			}
 			f6Down = f6;
+		}
+
+		// G: a wave of hostile mobs on the ground around Steve, so the host's people have something to fight
+		{
+			static bool gDown = false;
+			const bool g = (GetAsyncKeyState(0x47) & 0x8000) != 0;
+			if (g && !gDown)
+			{
+				sendf("{\"t\":\"spawnmobs\",\"k\":\"zombie\",\"n\":5,\"rmin\":8,\"rmax\":16,\"arc\":40,\"yaw\":0}");
+				natives::Notify("Mob ~g~wave");
+			}
+			gDown = g;
 		}
 
 		// a screen of Minecraft's own is open: its picture is already drawn over GTA's as the overlay,
