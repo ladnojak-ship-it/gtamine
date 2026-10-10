@@ -1878,12 +1878,15 @@ namespace
 		bool attached = false;
 		if (targetThread && targetThread != thisThread)
 			attached = AttachThreadInput(thisThread, targetThread, TRUE) != FALSE;
-		if (!SetForegroundWindow(hwnd) && HMODULE user32 = GetModuleHandleW(L"user32.dll"))
+		if (!SetForegroundWindow(hwnd))
 		{
 			// last resort: the undocumented call Alt-Tab itself makes, which ignores the foreground lock
-			using SwitchToThisWindowFn = void (WINAPI *)(HWND, BOOL);
-			if (auto switchTo = reinterpret_cast<SwitchToThisWindowFn>(GetProcAddress(user32, "SwitchToThisWindow")))
-				switchTo(hwnd, TRUE);
+			if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
+			{
+				using SwitchToThisWindowFn = void (WINAPI *)(HWND, BOOL);
+				if (auto switchTo = reinterpret_cast<SwitchToThisWindowFn>(GetProcAddress(user32, "SwitchToThisWindow")))
+					switchTo(hwnd, TRUE);
+			}
 		}
 		SetActiveWindow(hwnd);
 		SetFocus(hwnd);
