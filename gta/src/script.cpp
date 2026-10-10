@@ -1867,36 +1867,39 @@ namespace
 	static HWND g_mcWindow = nullptr;
 	static HWND g_gtaWindow = nullptr;
 
-	/// Minecraft's window: the pid the mod reported with hello first, then its title as a backstop, in case
-	/// the pid never arrived (a launcher that re-execs) or the window was recreated.
+	/// Minecraft's window, by the pid the mod reported with hello. Only local calls are used:
+	/// GetWindowTextW would send WM_GETTEXT to another process and wait, which can hang the caller.
 	static HWND mc_window()
 	{
 		if (g_mcWindow && IsWindow(g_mcWindow))
 			return g_mcWindow;
+		if (!g_mcPid)
+		{
+			dbg("mc_window: no pid yet");
+			return nullptr;
+		}
+		dbg("mc_window: enumerating for pid %lu", (unsigned long)g_mcPid);
 		struct Find
 		{
 			DWORD pid;
-			HWND byPid;
-			HWND byTitle;
+			HWND found;
 		};
-		Find find{g_mcPid, nullptr, nullptr};
+		Find find{g_mcPid, nullptr};
 		EnumWindows([](HWND w, LPARAM lp) -> BOOL {
 			Find *f = reinterpret_cast<Find *>(lp);
-			if (!IsWindowVisible(w) || GetWindow(w, GW_OWNER) != nullptr)
+			if (f->found || !IsWindowVisible(w) || GetWindow(w, GW_OWNER) != nullptr)
 				return TRUE;
-			wchar_t title[256] = {};
-			if (GetWindowTextW(w, title, 256) >= 9 && wcsncmp(title, L"Minecraft", 9) == 0 && f->byTitle == nullptr)
-				f->byTitle = w;
-			if (f->pid != 0 && f->byPid == nullptr)
+			DWORD owner = 0;
+			GetWindowThreadProcessId(w, &owner);
+			if (owner == f->pid)
 			{
-				DWORD owner = 0;
-				GetWindowThreadProcessId(w, &owner);
-				if (owner == f->pid)
-					f->byPid = w;
+				f->found = w;
+				return FALSE;
 			}
 			return TRUE;
 		}, reinterpret_cast<LPARAM>(&find));
-		g_mcWindow = find.byPid ? find.byPid : find.byTitle;
+		g_mcWindow = find.found;
+		dbg("mc_window: pid match -> %p", (void *)g_mcWindow);
 		return g_mcWindow;
 	}
 
@@ -1936,17 +1939,28 @@ namespace
 	/// even then it can refuse: attaching to the target's input thread first is what makes it reliable.
 	static void raise_window(const HWND hwnd)
 	{
+		dbg("raise_window: hwnd=%p", (void *)hwnd);
 		if (!hwnd || !IsWindow(hwnd))
+		{
+			dbg("raise_window: not a window");
 			return;
+		}
 		ShowWindow(hwnd, SW_RESTORE);
+		dbg("raise_window: ShowWindow done");
 		BringWindowToTop(hwnd);
+		dbg("raise_window: BringWindowToTop done");
 		DWORD targetThread = GetWindowThreadProcessId(hwnd, nullptr);
 		DWORD thisThread = GetCurrentThreadId();
 		bool attached = false;
+		dbg("raise_window: targetThread=%lu thisThread=%lu", (unsigned long)targetThread, (unsigned long)thisThread);
 		if (targetThread && targetThread != thisThread)
+		{
 			attached = AttachThreadInput(thisThread, targetThread, TRUE) != FALSE;
+			dbg("raise_window: AttachThreadInput -> %d", (int)attached);
+		}
 		if (!SetForegroundWindow(hwnd))
 		{
+			dbg("raise_window: SetForegroundWindow FAILED, trying SwitchToThisWindow");
 			// last resort: the undocumented call Alt-Tab itself makes, which ignores the foreground lock
 			if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
 			{
@@ -1955,11 +1969,9 @@ namespace
 					switchTo(hwnd, TRUE);
 			}
 		}
-		SetActiveWindow(hwnd);
-		SetFocus(hwnd);
+		dbg("raise_window: SetForegroundWindow done (foreground now %p)", (void *)GetForegroundWindow());
 		if (attached)
 			AttachThreadInput(thisThread, targetThread, FALSE);
-		dbg("raise_window hwnd=%p foreground=%d active=%d", (void *)hwnd, (int)(GetForegroundWindow() == hwnd), (int)(GetActiveWindow() == hwnd));
 	}
 
 	void mc_focus(const bool on)
@@ -2147,6 +2159,14 @@ namespace
 				drive_land(ped, tx, ty, g);
 				return;
 			}
+		}
+		// Minecraft's player flies through GTA's world (it has no physics and no collision there), so the
+		// player could be dragged under the map: hold them just above whatever ground is below.
+		float ground = 0.0f;
+		if (natives::GetGroundZFor3dCoord(tx, ty, tz + 2.0f, &ground, FALSE, FALSE) && tz < ground)
+		{
+			dbg("drive: clamped z %.2f up to ground %.2f", tz, ground);
+			tz = ground;
 		}
 		natives::SetEntityCoordsNoOffset(ped, tx, ty, tz + 1.0f);
 		const float d2r = 3.14159265f / 180.0f;
