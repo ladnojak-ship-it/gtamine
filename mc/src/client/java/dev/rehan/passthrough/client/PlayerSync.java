@@ -100,8 +100,15 @@ public final class PlayerSync {
 
 		player.setDeltaMovement(Vec3.ZERO);
 		Abilities abilities = player.getAbilities();
-		if (abilities.mayfly && !abilities.flying) {
+		// Whatever the game mode permits, and only that: creative and spectator fly and cannot be hurt,
+		// survival is left exactly as Minecraft has it. A Steve that dies mid-fight leaves the player
+		// stranded in the host with nothing to stand behind, so the creative case keeps him up.
+		if (abilities.mayfly) {
 			abilities.flying = true;
+			abilities.invulnerable = true;
+			player.onUpdateAbilities();
+		} else if (abilities.invulnerable) {
+			abilities.invulnerable = false; // mortal again the moment the mode leaves creative
 			player.onUpdateAbilities();
 		}
 	}
