@@ -527,6 +527,29 @@ namespace
 		g_drive.armed = false;
 	}
 
+	/// The host's people run from a spot. A firework bursting next to one, or a campfire it walks into,
+	/// is not supposed to be ignored: fleeing is the reaction, and it lasts a moment before they wander back.
+	void scare_peds(const float x, const float y, const float z, const float radius)
+	{
+		int handles[256];
+		const int n = worldGetAllPeds(handles, 256);
+		for (int i = 0; i < n; ++i)
+		{
+			const Ped q = handles[i];
+			if (q == 0 || natives::IsPedDeadOrDying(q) || g_doublePeds.count(q)
+				|| std::find(g_squad.begin(), g_squad.end(), q) != g_squad.end())
+				continue;
+			const Vector3 o = natives::GetEntityCoords(q, TRUE);
+			const float dx = o.x - x, dy = o.y - y;
+			if (dx * dx + dy * dy > radius * radius)
+				continue;
+			if (std::abs(o.z - z) > radius * 0.75f)
+				continue;
+			natives::SetPedFleeAttributes(q, 1, TRUE);
+			natives::TaskSmartFleeCoord(q, x, y, z);
+		}
+	}
+
 	/// A Minecraft projectile went from (ax..) to (bx..) this tick (GTA coordinates): if that crosses anything of GTA's,
 	/// a firework blows up there and an arrow lands a bullet in a person or car (or sticks in a wall), and
 	/// Minecraft is told where (so the rocket bursts / the arrow stops there too).
@@ -1233,28 +1256,6 @@ namespace
 		return g_hot.count(cell_key(x, y, z)) != 0;
 	}
 
-	/// The host's people run from a spot. A firework bursting next to one, or a campfire it walks into,
-	/// is not supposed to be ignored: fleeing is the reaction, and it lasts a moment before they wander back.
-	void scare_peds(const float x, const float y, const float z, const float radius)
-	{
-		int handles[256];
-		const int n = worldGetAllPeds(handles, 256);
-		for (int i = 0; i < n; ++i)
-		{
-			const Ped q = handles[i];
-			if (q == 0 || natives::IsPedDeadOrDying(q) || g_doublePeds.count(q)
-				|| std::find(g_squad.begin(), g_squad.end(), q) != g_squad.end())
-				continue;
-			const Vector3 o = natives::GetEntityCoords(q, TRUE);
-			const float dx = o.x - x, dy = o.y - y;
-			if (dx * dx + dy * dy > radius * radius)
-				continue;
-			if (std::abs(o.z - z) > radius * 0.75f)
-				continue;
-			natives::SetPedFleeAttributes(q, 1, TRUE);
-			natives::TaskSmartFleeCoord(q, x, y, z);
-		}
-	}
 
 	/// Five times a second: GTA's people and cars on (or in) Minecraft's lava, fire or magma catch fire.
 	void hot_tick(Ped player)
