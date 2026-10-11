@@ -18,10 +18,12 @@ final class ClientInput {
 	static void handle(final Minecraft minecraft, final JsonObject m) {
 		LocalPlayer player = minecraft.player;
 		switch (m.get("t").getAsString()) {
-			// the host's mouse, forwarded because a screen of our own is open over its picture
+			// the host's mouse, forwarded because a screen of our own is open over its picture.
+			// y is negated: the host reads the cursor position down the screen, Minecraft's screens count it
+			// from the top, and the picture the host composites is already the right way up
 			case "mouse" -> {
 				final double dx = m.get("dx").getAsDouble(), dy = m.get("dy").getAsDouble();
-				ScreenInput.move(minecraft, dx * 0.5, dy * 0.5);
+				ScreenInput.move(minecraft, dx * 0.5, -dy * 0.5);
 				if (ScreenInput.mouseLog < 6) {
 					ScreenInput.mouseLog++;
 					Passthrough.LOG.info("mouse dx={} dy={} -> {},{}", dx, dy, ScreenInput.cursorX(), ScreenInput.cursorY());
@@ -29,7 +31,7 @@ final class ClientInput {
 			}
 			// the host's keyboard, forwarded because its chat is open: real commands are typed in
 			case "chattext" -> ChatInput.text(minecraft, m.get("c").getAsString(), m.has("mods") ? m.get("mods").getAsInt() : 0);
-			case "chatkey" -> ChatInput.special(minecraft, m.get("k").getAsString());
+			case "chatkey" -> ChatInput.special(minecraft, m.get("k").getAsInt(), m.has("m") ? m.get("m").getAsInt() : 0);
 			case "key" -> {
 				String k = m.get("k").getAsString();
 				boolean down = !m.has("down") || m.get("down").getAsBoolean();

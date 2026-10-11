@@ -1883,17 +1883,8 @@ namespace
 	}
 
 	// --- Typing into Minecraft's chat. Windows only hands the focus to the foreground process, so instead of
-	// fighting for it the host keys for us: while the chat is open a low-level keyboard hook turns keys into
-	// text and queues them for the script thread to send. The hook lives only as long as the chat does, and
-	// stands down if the script stops feeding it, so it can never hold the keyboard hostage.
-	struct ChatKey
-	{
-		UINT vk = 0;
-		int len = 0;
-		char text[8] = {};
-	};
-	static std::mutex g_chatMutex;
-	static std::vector<ChatKey> g_chatQueue;
+	// fighting for it the host keys for us: ScriptHookV's own keyboard callback (which runs on the game's
+	// message thread and carries the scan code the layout lookup needs) hands every key to the chat.
 
 	/// The character a key produces in the layout the user is actually typing in (Russian included).
 	static int vk_to_char(const UINT vk, const UINT scanCode)
@@ -1940,47 +1931,6 @@ namespace
 			}
 		}
 		g_lastCursor = cur;
-	}
-
-	/// Send what the game's own keyboard callback queued. Runs on the script thread, never in the callback.
-	void chat_tick()
-	{
-		std::vector<ChatKey> pending;
-		{
-			std::lock_guard<std::mutex> lock(g_chatMutex);
-			pending.swap(g_chatQueue);
-		}
-		for (const auto &key : pending)
-		{
-			if (key.vk == VK_RETURN)
-			{
-				g_ws.send("{\"t\":\"chatkey\",\"k\":\"enter\"}");
-				dbg("chat enter");
-			}
-			else if (key.vk == VK_BACK)
-			{
-				g_ws.send("{\"t\":\"chatkey\",\"k\":\"back\"}");
-				dbg("chat back");
-			}
-			else if (key.vk == VK_ESCAPE)
-			{
-				g_ws.send("{\"t\":\"chatkey\",\"k\":\"escape\"}");
-				dbg("chat escape");
-			}
-			else if (key.len > 0)
-			{
-				std::string esc;
-				for (int i = 0; i < key.len; ++i)
-				{
-					const char c = key.text[i];
-					if (c == '"' || c == '\\' || (unsigned char)c < 32)
-						esc += '\\';
-					esc += c;
-				}
-				g_ws.send("{\"t\":\"chattext\",\"c\":\"" + esc + "\"}");
-				dbg("chat text '%s'", esc.c_str());
-			}
-		}
 	}
 
 	// --- Focus swapping. Minecraft's own screens (inventory, chests, chat) need the keyboard and the
@@ -2513,11 +2463,9 @@ namespace
 			natives::DisableControlAction(0, 32, TRUE);
 			natives::DisableControlAction(0, 33, TRUE);
 			natives::DisableControlAction(0, 22, TRUE);
+			natives::DisableControlAction(0, 23, TRUE); // no getting into a car while typing
 			if (g_ws.connected())
-			{
 				mouse_tick();
-				chat_tick();
-			}
 		}
 
 		// the player's take-off: Space (jump) while armed, or a real fall off something tall
@@ -2709,6 +2657,35 @@ namespace
 		}
 	}
 
+	/// The GLFW key code for a Windows virtual key: letters and digits are their ASCII values in both,
+	/// the rest are the fixed GLFW ones. A line of chat needs more than the letters.
+	static int vk_to_glfw(const DWORD vk)
+	{
+		if (vk >= 'A' && vk <= 'Z')
+			return int(vk);
+		if (vk >= '0' && vk <= '9')
+			return int(vk);
+		switch (vk)
+		{
+		case VK_SPACE: return 32;
+		case VK_RETURN: return 257;
+		case VK_ESCAPE: return 256;
+		case VK_TAB: return 258;
+		case VK_BACK: return 259;
+		case VK_INSERT: return 260;
+		case VK_DELETE: return 261;
+		case VK_RIGHT: return 262;
+		case VK_LEFT: return 263;
+		case VK_DOWN: return 264;
+		case VK_UP: return 265;
+		case VK_PRIOR: return 266;
+		case VK_NEXT: return 267;
+		case VK_HOME: return 268;
+		case VK_END: return 269;
+		default: return 0;
+		}
+	}
+
 	/// A key, typed while the host's keyboard is being typed for Minecraft's chat. ScriptHookV calls this on
 	/// the game's own message thread, so it comes with the real scan code the layout lookup needs - unlike a
 	/// low-level hook installed from the script thread, which never runs at all.
@@ -2730,21 +2707,29 @@ namespace
 		if (!g_chatOpen)
 			return;
 
-		ChatKey chat;
-		chat.vk = key;
-		if (key != VK_RETURN && key != VK_BACK && key != VK_ESCAPE)
+		const int glfw = vk_to_glfw(key);
+		if (glfw == 0)
+			return; // no use to the chat (a function key, say)
+		int mods = 0;
+		if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+			mods |= 1;
+		if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+			mods |= 2;
+		if (altDown || (GetAsyncKeyState(VK_MENU) & 0x8000))
+			mods |= 4;
+
+		// every key goes to the chat: the ones that stand for a character go as one (unless a modifier is
+		// making a shortcut of it, ctrl+v and friends are keys), the rest as the key
+		if ((mods & 2) == 0)
 		{
-			if (altDown || (GetAsyncKeyState(VK_CONTROL) & 0x8000))
-				return; // a shortcut, not text: leave it to the game
 			const int c = vk_to_char(key, scan);
-			if (c == 0)
-				return; // not text
-			chat.text[0] = (char)(c < 128 ? c : '?');
-			chat.len = 1;
+			if (c != 0)
+			{
+				char t[8] = {(char)(c < 128 ? c : '?'), 0};
+				sendf("{\"t\":\"chattext\",\"c\":\"%s\"}", t);
+			}
 		}
-		std::lock_guard<std::mutex> lock(g_chatMutex);
-		if (g_chatQueue.size() < 64)
-			g_chatQueue.push_back(chat);
+		sendf("{\"t\":\"chatkey\",\"k\":%d,\"m\":%d}", glfw, mods);
 	}
 }
 

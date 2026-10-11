@@ -32,25 +32,21 @@ public final class ChatInput {
 		}
 	}
 
-	/** The keys a chat line cannot be written without. GLFW's own key codes, which never move. */
-	public static void special(final Minecraft minecraft, final String k) {
+	/**
+	 * The keys a chat line cannot be written without: arrows, home and end, ctrl+v, and the rest. The host
+	 * cannot swallow keys - its own keyboard callback only reports them - so every one of them has to come
+	 * through here, or the line can only ever be typed and never edited.
+	 */
+	public static void special(final Minecraft minecraft, final int glfw, final int modifiers) {
 		if (!(minecraft.gui.screen() instanceof ChatScreen chat)) {
 			return;
 		}
 
-		final int key = switch (k) {
-			case "enter" -> 257;
-			case "back" -> 259;
-			default -> 0;
-		};
-		if (k.equals("escape")) {
+		if (glfw == 256) { // escape: close it here, since the host keeps the key for itself
 			chat.onClose();
 			return;
 		}
-		if (key == 0) {
-			return;
-		}
 
-		chat.keyPressed(new KeyEvent(key, 0, 0));
+		chat.keyPressed(new KeyEvent(glfw, 0, modifiers));
 	}
 }
