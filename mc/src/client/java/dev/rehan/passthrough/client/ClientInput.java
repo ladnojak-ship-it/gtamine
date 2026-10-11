@@ -19,11 +19,10 @@ final class ClientInput {
 		LocalPlayer player = minecraft.player;
 		switch (m.get("t").getAsString()) {
 			// the host's mouse, forwarded because a screen of our own is open over its picture.
-			// y is negated: the host reads the cursor position down the screen, Minecraft's screens count it
-			// from the top, and the picture the host composites is already the right way up
+			// the host's mouse, forwarded because a screen of our own is open over its picture
 			case "mouse" -> {
 				final double dx = m.get("dx").getAsDouble(), dy = m.get("dy").getAsDouble();
-				ScreenInput.move(minecraft, dx * 0.5, -dy * 0.5);
+				ScreenInput.move(minecraft, dx * 0.5, dy * 0.5);
 				if (ScreenInput.mouseLog < 6) {
 					ScreenInput.mouseLog++;
 					Passthrough.LOG.info("mouse dx={} dy={} -> {},{}", dx, dy, ScreenInput.cursorX(), ScreenInput.cursorY());

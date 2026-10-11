@@ -35,7 +35,11 @@ public final class ScreenInput {
 			&& !(minecraft.gui.screen() instanceof ChatScreen);
 	}
 
-	/** The host's mouse, applied to whatever screen is open. */
+	/**
+	 * The host's mouse, applied to whatever screen is open. The axis is the host's: it counts down the
+	 * screen while the screen counts up, so it is not negated - the overlay the host composites is already
+	 * the right way up, and negating it made the cursor run the other way from the hand.
+	 */
 	public static void move(final Minecraft minecraft, final double dx, final double dy) {
 		final Screen screen = minecraft.gui.screen();
 		if (screen == null) {
