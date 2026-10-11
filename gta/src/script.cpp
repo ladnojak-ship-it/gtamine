@@ -529,14 +529,16 @@ namespace
 
 	/// The host's people run from a spot. A firework bursting next to one, or a campfire it walks into,
 	/// is not supposed to be ignored: fleeing is the reaction, and it lasts a moment before they wander back.
-	void scare_peds(const float x, const float y, const float z, const float radius)
+	/// The player is never touched: this is a script on their ped, and running it on them would hand the
+	/// character over to GTA's AI mid-frame.
+	void scare_peds(Ped player, const float x, const float y, const float z, const float radius)
 	{
 		int handles[256];
 		const int n = worldGetAllPeds(handles, 256);
 		for (int i = 0; i < n; ++i)
 		{
 			const Ped q = handles[i];
-			if (q == 0 || natives::IsPedDeadOrDying(q) || g_doublePeds.count(q)
+			if (q == 0 || q == player || natives::IsPedDeadOrDying(q) || g_doublePeds.count(q)
 				|| std::find(g_squad.begin(), g_squad.end(), q) != g_squad.end())
 				continue;
 			const Vector3 o = natives::GetEntityCoords(q, TRUE);
@@ -588,7 +590,7 @@ namespace
 			natives::AddExplosion(end.x, end.y, end.z, 4 /* rocket */, 1.0f, TRUE, FALSE, 0.3f, FALSE);
 			shake_from(end.x, end.y, end.z, 0.6f);
 			// a firework going off over their heads is what makes people scatter
-			scare_peds(end.x, end.y, end.z, 18.0f);
+			scare_peds(ped, end.x, end.y, end.z, 18.0f);
 		}
 		else if (kind == 1 || kind == 2)
 			natives::ShootSingleBulletBetweenCoords(end.x - ux * 1.0f, end.y - uy * 1.0f, end.z - uz * 1.0f,
@@ -1280,7 +1282,7 @@ namespace
 			{
 				natives::StartEntityFire(q);
 				// standing in it is a reason to run, not to stand and burn: the fire is under their feet
-				scare_peds(o.x, o.y, o.z, 14.0f);
+				scare_peds(player, o.x, o.y, o.z, 14.0f);
 			}
 		}
 		const Vehicle mine = natives::IsPedInAnyVehicle(player, FALSE) ? natives::GetVehiclePedIsIn(player, FALSE) : 0;
@@ -1817,6 +1819,17 @@ namespace
 	/// Spawn a few queued props per frame (the model has to be streamed in first).
 	void props_tick()
 	{
+		// GTA quietly drops script objects that fall out of its streaming range, which used to leave a
+		// build with no collision the moment the player walked away. A prop whose handle is gone is
+		// forgotten here, so the next sync re-creates it.
+		for (auto it = g_props.live.begin(); it != g_props.live.end();)
+		{
+			if (natives::DoesEntityExist(it->second))
+				++it;
+			else
+				it = g_props.live.erase(it);
+		}
+
 		if (g_props.pending.empty() || !props_model_ready())
 			return;
 		// the model's box centred on the block horizontally and sitting on its floor
@@ -1973,6 +1986,7 @@ namespace
 	// g_chatOpen is that for the keyboard, because the chat is the one screen that wants it.
 	static std::atomic<bool> g_mcScreen{false};
 	static std::atomic<bool> g_chatOpen{false};
+	static int g_nextPropsSyncAt = 0;
 
 	/// Minecraft's window, by the pid the mod reported with hello. Only local calls are used:
 	/// GetWindowTextW would send WM_GETTEXT to another process and wait, which can hang the caller.
@@ -2241,11 +2255,20 @@ namespace
 		}
 		if (type == "pteleport")
 		{
-			// Minecraft moved the player (ender pearl): move GTA's player there, keeping the height mapping
+			// Minecraft moved the player (ender pearl): move GTA's player there, keeping the height mapping.
+			// A pearl can land inside a wall or over a ledge, and the ground Minecraft knows about is the
+			// host's own: never end up under it, or the player is stuck in the dark with no way back.
 			const char *pos = json_value(message, "pos");
 			double x, y, z;
 			if (pos && sscanf_s(pos, "[%lf ,%lf ,%lf ]", &x, &y, &z) == 3)
-				natives::SetEntityCoordsNoOffset(natives::PlayerPedId(), float(x), float(-z), float(y - g_yOffset + 1.0));
+			{
+				const float gx = float(x), gy = float(-z), gz = float(y - g_yOffset + 1.0);
+				float ground = 0.0f;
+				if (natives::GetGroundZFor3dCoord(gx, gy, gz + 60.0f, &ground, FALSE, FALSE) && gz < ground)
+					natives::SetEntityCoordsNoOffset(natives::PlayerPedId(), gx, gy, ground + 1.0f);
+				else
+					natives::SetEntityCoordsNoOffset(natives::PlayerPedId(), gx, gy, gz);
+			}
 			return;
 		}
 		if (type != "explosion")
@@ -2258,7 +2281,7 @@ namespace
 		g_booms[g_boomNext++ % 8] = {float(x), float(-z), float(y - g_yOffset), natives::GetGameTimer() + 500};
 		// a firework's burst is the loud, bright one that scares people: everything else only cracks
 		if (radius < 2.0 || json_str(message, "src") == "firework")
-			scare_peds(float(x), float(-z), float(y - g_yOffset), 16.0f);
+			scare_peds(natives::PlayerPedId(), float(x), float(-z), float(y - g_yOffset), 16.0f);
 		const std::string src = json_str(message, "src");
 		if (src == "fireball" || src == "wither_skull" || src == "dragon_fireball")
 		{
@@ -2668,6 +2691,13 @@ namespace
 			if (!g_mobs.empty())
 				sample_patches();
 			props_tick();
+			// twice a second, ask for the blocks again: whatever GTA dropped while the player walked away
+			// comes back, and a block placed and broken while away is picked up too
+			if (natives::GetGameTimer() >= g_nextPropsSyncAt)
+			{
+				g_nextPropsSyncAt = natives::GetGameTimer() + 500;
+				g_ws.send("{\"t\":\"blocksync\",\"r\":64}");
+			}
 		}
 
 		std::string message;
@@ -2747,6 +2777,14 @@ namespace
 		if (key == VK_F8)
 		{
 			g_relevel = true;
+			return;
+		}
+		if (key == VK_F9)
+		{
+			// every block that was ever mirrored, plus the host's own collision props: back to a bare lot
+			props_clear_all();
+			g_ws.send("{\"t\":\"clear\"}");
+			natives::Notify("Blocks ~r~cleared");
 			return;
 		}
 		if (!g_chatOpen)
