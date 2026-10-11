@@ -2580,6 +2580,21 @@ namespace
 			}
 		}
 
+		// While the chat is open the host types, and every one of its keys belongs to the chat. The keys
+		// normally forwarded to Minecraft (E, Q, T) are not: typing an "e" would open the inventory behind
+		// the line and a "t" would close it, and the letters would otherwise open GTA's own menus too.
+		if (g_chatOpen)
+		{
+			for (int control = 0; control < 357; ++control)
+				natives::DisableControlAction(0, control, TRUE);
+			if (g_mouseHook != nullptr && g_ws.connected())
+			{
+				g_hookFed = GetTickCount();
+				mouse_tick();
+			}
+			return;
+		}
+
 		// the player's take-off: Space (jump) while armed, or a real fall off something tall
 		const bool takeOff = g_drive.user && natives::GetGameTimer() >= g_drive.armAfter && natives::IsDisabledControlJustPressed(0, 22);
 		if (g_drive.armed && !g_drive.on && (takeOff || drive_should_launch(ped)))
