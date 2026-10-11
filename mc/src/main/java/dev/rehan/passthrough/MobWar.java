@@ -74,9 +74,32 @@ public final class MobWar {
 		return e instanceof Villager && (e.isInvisible() || e.entityTags().contains(PROXY_TAG));
 	}
 
-	/** Mobs that join the fight: hostile, goal-driven ones. */
+	/**
+	 * The bosses, and brain-driven hostiles. Neither can be reached by a targeting goal: bosses are not
+	 * Enemy in the class tree (the wither and the dragon are just Mob), and brain-driven mobs pick a
+	 * target from brain memories rather than from goals, so they'd never join the fight on their own.
+	 * They are driven directly at the nearest host person's proxy every tick instead.
+	 */
+	private static boolean driven(final Entity e) {
+		if (!(e instanceof Mob) || isProxy(e)) {
+			return false;
+		}
+
+		final String path = BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath();
+		return BRAIN_MOBS.contains(path) || path.equals("wither") || path.equals("ender_dragon") || path.equals("elder_guardian");
+	}
+
+	/** Mobs that join the fight: the goal-driven hostiles, plus everything in {@link #driven(Entity)}. */
 	private static boolean fighter(final Entity e) {
-		return e instanceof Mob && e instanceof Enemy && !isProxy(e) && !BRAIN_MOBS.contains(BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath());
+		if (!(e instanceof Mob) || isProxy(e)) {
+			return false;
+		}
+
+		if (driven(e)) {
+			return true;
+		}
+
+		return e instanceof Enemy && !BRAIN_MOBS.contains(BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath());
 	}
 
 	public static void peds(final double[] flat) {
@@ -134,8 +157,33 @@ public final class MobWar {
 		ServerLevel level = s.overworld();
 		syncProxies(level);
 		applyDamage(level);
+		driveDriven(level);
 		if (Passthrough.active) {
 			reportMobs(s, level);
+		}
+	}
+
+	/**
+	 * Point the bosses and brain-driven mobs at the nearest host person's proxy. Their targeting never goes
+	 * through a goal, so without this the wither, the dragon and the warden would stand over GTA's streets
+	 * and ignore everyone.
+	 */
+	private static void driveDriven(final ServerLevel level) {
+		if (proxies.isEmpty()) {
+			return;
+		}
+
+		for (Villager proxy : proxies.values()) {
+			if (proxy.isRemoved()) {
+				continue;
+			}
+
+			for (Entity e : level.getEntities((Entity) null, proxy.getBoundingBox().inflate(FOLLOW_RANGE), MobWar::driven)) {
+				final Mob mob = (Mob) e;
+				if (mob.getTarget() != proxy && mob.distanceToSqr(proxy) < FOLLOW_RANGE * FOLLOW_RANGE) {
+					mob.setTarget(proxy);
+				}
+			}
 		}
 	}
 
