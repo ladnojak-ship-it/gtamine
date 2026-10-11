@@ -31,6 +31,8 @@ final class ClientInput {
 			// the host's keyboard, forwarded because its chat is open: real commands are typed in
 			case "chattext" -> ChatInput.text(minecraft, m.get("c").getAsString(), m.has("mods") ? m.get("mods").getAsInt() : 0);
 			case "chatkey" -> ChatInput.special(minecraft, m.get("k").getAsInt(), m.has("m") ? m.get("m").getAsInt() : 0);
+			// the host's wheel over a screen of our own (its weapon wheel while nothing is open)
+			case "invscroll" -> ScreenInput.scroll(minecraft, m.get("d").getAsDouble());
 			case "key" -> {
 				String k = m.get("k").getAsString();
 				boolean down = !m.has("down") || m.get("down").getAsBoolean();
@@ -42,11 +44,13 @@ final class ClientInput {
 					return;
 				}
 
-				// a screen of our own is open: its buttons are the mouse at the cursor, not keybindings
+				// a screen of our own is open: its buttons are the mouse at the cursor, not keybindings.
+				// The two are swapped from the world's: the host's left is the screen's right, which is how
+				// its own inventory works, so a click lands on the action the player sees under the cursor.
 				if (minecraft.gui.screen() != null) {
 					final int button = switch (k) {
-						case "attack" -> 0;
-						case "use" -> 1;
+						case "attack" -> 1;
+						case "use" -> 0;
 						default -> -1;
 					};
 					if (button >= 0) {

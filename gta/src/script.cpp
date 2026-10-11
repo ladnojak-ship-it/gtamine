@@ -2671,9 +2671,9 @@ namespace
 		aim_cam_tick(gun && natives::IsPlayerFreeAiming(natives::PlayerId()));
 		gun_model_tick(ped, gun && !natives::IsPauseMenuActive());
 		if (natives::IsDisabledControlJustPressed(0, 14) || natives::IsDisabledControlJustPressed(0, 16))
-			g_ws.send("{\"t\":\"scroll\",\"d\":-1}");
+			g_ws.send(g_mcScreen ? "{\"t\":\"invscroll\",\"d\":-1}" : "{\"t\":\"scroll\",\"d\":-1}");
 		if (natives::IsDisabledControlJustPressed(0, 15) || natives::IsDisabledControlJustPressed(0, 17))
-			g_ws.send("{\"t\":\"scroll\",\"d\":1}");
+			g_ws.send(g_mcScreen ? "{\"t\":\"invscroll\",\"d\":1}" : "{\"t\":\"scroll\",\"d\":1}");
 		for (int i = 0; i < 9; ++i)
 			if (natives::IsDisabledControlJustPressed(0, kHotbarControls[i]))
 				sendf("{\"t\":\"slot\",\"n\":%d}", i);
@@ -2806,11 +2806,17 @@ namespace
 		// making a shortcut of it, ctrl+v and friends are keys), the rest as the key
 		if ((mods & 2) == 0)
 		{
+			// a quote or a backslash in the raw string is invalid JSON, and the whole key would then be
+			// dropped on the far side with nothing typed at all
 			const int c = vk_to_char(key, scan);
 			if (c != 0)
 			{
-				char t[8] = {(char)(c < 128 ? c : '?'), 0};
-				sendf("{\"t\":\"chattext\",\"c\":\"%s\"}", t);
+				if (c == '"' || c == '\\')
+					sendf("{\"t\":\"chattext\",\"c\":\"\\%c\"}", c);
+				else if (c < 0x20)
+					sendf("{\"t\":\"chattext\",\"c\":\"\\u%04x\"}", (unsigned)c);
+				else
+					sendf("{\"t\":\"chattext\",\"c\":\"%c\"}", c);
 			}
 		}
 		sendf("{\"t\":\"chatkey\",\"k\":%d,\"m\":%d}", glfw, mods);

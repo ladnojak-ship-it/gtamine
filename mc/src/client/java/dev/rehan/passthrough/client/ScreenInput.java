@@ -94,4 +94,19 @@ public final class ScreenInput {
 			screen.mouseReleased(event);
 		}
 	}
+
+	/**
+	 * The host's mouse wheel over a screen of our own. Its own wheel is the weapon wheel while a screen is
+	 * closed, so this is a different message: in the creative inventory it scrolls the item list, and in any
+	 * other container it scrolls whatever list the screen has.
+	 */
+	public static void scroll(final Minecraft minecraft, final double amount) {
+		final Screen screen = minecraft.gui.screen();
+		if (screen == null) {
+			return;
+		}
+
+		move(minecraft, 0.0, 0.0);
+		screen.mouseScrolled(x, y, 0.0, amount);
+	}
 }
