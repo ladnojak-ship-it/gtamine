@@ -564,6 +564,8 @@ namespace
 		{
 			natives::AddExplosion(end.x, end.y, end.z, 4 /* rocket */, 1.0f, TRUE, FALSE, 0.3f, FALSE);
 			shake_from(end.x, end.y, end.z, 0.6f);
+			// a firework going off over their heads is what makes people scatter
+			scare_peds(end.x, end.y, end.z, 18.0f);
 		}
 		else if (kind == 1 || kind == 2)
 			natives::ShootSingleBulletBetweenCoords(end.x - ux * 1.0f, end.y - uy * 1.0f, end.z - uz * 1.0f,
@@ -1231,6 +1233,29 @@ namespace
 		return g_hot.count(cell_key(x, y, z)) != 0;
 	}
 
+	/// The host's people run from a spot. A firework bursting next to one, or a campfire it walks into,
+	/// is not supposed to be ignored: fleeing is the reaction, and it lasts a moment before they wander back.
+	void scare_peds(const float x, const float y, const float z, const float radius)
+	{
+		int handles[256];
+		const int n = worldGetAllPeds(handles, 256);
+		for (int i = 0; i < n; ++i)
+		{
+			const Ped q = handles[i];
+			if (q == 0 || natives::IsPedDeadOrDying(q) || g_doublePeds.count(q)
+				|| std::find(g_squad.begin(), g_squad.end(), q) != g_squad.end())
+				continue;
+			const Vector3 o = natives::GetEntityCoords(q, TRUE);
+			const float dx = o.x - x, dy = o.y - y;
+			if (dx * dx + dy * dy > radius * radius)
+				continue;
+			if (std::abs(o.z - z) > radius * 0.75f)
+				continue;
+			natives::SetPedFleeAttributes(q, 1, TRUE);
+			natives::TaskSmartFleeCoord(q, x, y, z);
+		}
+	}
+
 	/// Five times a second: GTA's people and cars on (or in) Minecraft's lava, fire or magma catch fire.
 	void hot_tick(Ped player)
 	{
@@ -1251,7 +1276,11 @@ namespace
 				continue;
 			const int cx = int(std::floor(o.x)), cz = int(std::floor(-o.y)), cy = int(std::floor(o.z - 1.0f + g_yOffset + 0.2f));
 			if (hot_at(cx, cy, cz) || hot_at(cx, cy - 1, cz))
+			{
 				natives::StartEntityFire(q);
+				// standing in it is a reason to run, not to stand and burn: the fire is under their feet
+				scare_peds(o.x, o.y, o.z, 14.0f);
+			}
 		}
 		const Vehicle mine = natives::IsPedInAnyVehicle(player, FALSE) ? natives::GetVehiclePedIsIn(player, FALSE) : 0;
 		const int cars = worldGetAllVehicles(handles, 256);
@@ -2226,6 +2255,9 @@ namespace
 			return;
 		const double radius = json_num(message, "r", 4.0);
 		g_booms[g_boomNext++ % 8] = {float(x), float(-z), float(y - g_yOffset), natives::GetGameTimer() + 500};
+		// a firework's burst is the loud, bright one that scares people: everything else only cracks
+		if (radius < 2.0 || json_str(message, "src") == "firework")
+			scare_peds(float(x), float(-z), float(y - g_yOffset), 16.0f);
 		const std::string src = json_str(message, "src");
 		if (src == "fireball" || src == "wither_skull" || src == "dragon_fireball")
 		{
