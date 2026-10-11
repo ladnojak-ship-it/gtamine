@@ -1997,6 +1997,24 @@ namespace
 		}
 	}
 
+	/// Where the layout lookup fails, the punctuation a command line cannot do without. The physical key
+	/// never moves, so "/" is the same key on every layout - unshifted on a Latin one, shifted on Russian,
+	/// where the unshifted key is ".".
+	static int vk_punct_fallback(const UINT vk)
+	{
+		const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+		switch (vk)
+		{
+		case VK_OEM_2: return shift ? '/' : '.';
+		case VK_OEM_PERIOD: return shift ? '>' : ',';
+		case VK_OEM_MINUS: return shift ? '_' : '-';
+		case VK_OEM_PLUS: return shift ? '+' : '=';
+		case VK_OEM_5: return shift ? '|' : '\\';
+		case VK_SPACE: return ' ';
+		default: return 0;
+		}
+	}
+
 	/// The character a key produces in the layout the user is actually typing in (Russian included).
 	static int vk_to_char(const UINT vk, const UINT scanCode)
 	{
@@ -2025,26 +2043,6 @@ namespace
 		return vk_punct_fallback(vk);
 	}
 
-	/// Where the layout lookup fails, the punctuation a command line cannot do without. The physical key
-	/// never moves, so "/" is the same key on every layout - unshifted on a Latin one, shifted on Russian,
-	/// where the unshifted key is ".".
-	static int vk_punct_fallback(const UINT vk)
-	{
-		const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-		switch (vk)
-		{
-		case VK_OEM_2: return shift ? '/' : '.';
-		case VK_OEM_PERIOD: return shift ? '>' : ',';
-		case VK_OEM_MINUS: return shift ? '_' : '-';
-		case VK_OEM_PLUS: return shift ? '+' : '=';
-		case VK_OEM_5: return shift ? '|' : '\\';
-		case VK_SPACE: return ' ';
-		default: return 0;
-		}
-	}
-
-	// --- Focus swapping. Minecraft's own screens (inventory, chests, chat) need the keyboard and the
-	// mouse, which only the focused window receives. Minecraft renders unfocused and never pauses, so
 	// moving the focus there and back is safe and the passthrough keeps running while it is open.
 	static DWORD g_mcPid = 0;
 	static HWND g_mcWindow = nullptr;
