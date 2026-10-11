@@ -2013,10 +2013,34 @@ namespace
 			thread = GetWindowThreadProcessId(fg, nullptr);
 		const HKL layout = GetKeyboardLayout(thread ? thread : GetCurrentThreadId());
 		// the scan code is required: without it the layout lookup returns nothing
-		const int n = ToUnicodeEx(vk, scanCode, state, out, 8, 0, layout);
+		int n = ToUnicodeEx(vk, scanCode, state, out, 8, 0, layout);
+		if (n < 0)
+		{
+			// a dead key poisons the state, and every later lookup then fails: flush it
+			ToUnicodeEx(vk, 0, state, nullptr, 0, 0, layout);
+			n = 0;
+		}
 		if (n == 1 && out[0] >= 32 && out[0] != 127)
 			return int(out[0]);
-		return 0;
+		return vk_punct_fallback(vk);
+	}
+
+	/// Where the layout lookup fails, the punctuation a command line cannot do without. The physical key
+	/// never moves, so "/" is the same key on every layout - unshifted on a Latin one, shifted on Russian,
+	/// where the unshifted key is ".".
+	static int vk_punct_fallback(const UINT vk)
+	{
+		const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+		switch (vk)
+		{
+		case VK_OEM_2: return shift ? '/' : '.';
+		case VK_OEM_PERIOD: return shift ? '>' : ',';
+		case VK_OEM_MINUS: return shift ? '_' : '-';
+		case VK_OEM_PLUS: return shift ? '+' : '=';
+		case VK_OEM_5: return shift ? '|' : '\\';
+		case VK_SPACE: return ' ';
+		default: return 0;
+		}
 	}
 
 	// --- Focus swapping. Minecraft's own screens (inventory, chests, chat) need the keyboard and the
