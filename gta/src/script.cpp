@@ -2658,7 +2658,8 @@ namespace
 	}
 
 	/// The GLFW key code for a Windows virtual key: letters and digits are their ASCII values in both,
-	/// the rest are the fixed GLFW ones. A line of chat needs more than the letters.
+	/// the rest are the fixed GLFW ones. A line of chat needs more than the letters - "/", for one,
+	/// sits on VK_OEM_2 on most layouts, and without it the key would be dropped entirely.
 	static int vk_to_glfw(const DWORD vk)
 	{
 		if (vk >= 'A' && vk <= 'Z')
@@ -2668,6 +2669,14 @@ namespace
 		switch (vk)
 		{
 		case VK_SPACE: return 32;
+		case VK_OEM_3: return 96;   // `~
+		case VK_OEM_MINUS: return 45; // -_
+		case VK_OEM_PLUS: return 61; // =+
+		case VK_OEM_4: return 91;    // [{
+		case VK_OEM_6: return 93;    // ]}
+		case VK_OEM_5: return 92;    // \|
+		case VK_OEM_1: return 59;    // ;:
+		case VK_OEM_7: return 39;    // '"
 		case VK_RETURN: return 257;
 		case VK_ESCAPE: return 256;
 		case VK_TAB: return 258;
@@ -2682,6 +2691,9 @@ namespace
 		case VK_NEXT: return 267;
 		case VK_HOME: return 268;
 		case VK_END: return 269;
+		case VK_OEM_PERIOD: return 46; // .>
+		case VK_OEM_COMMA: return 44; // ,<
+		case VK_OEM_2: return 47;      // /?
 		default: return 0;
 		}
 	}
