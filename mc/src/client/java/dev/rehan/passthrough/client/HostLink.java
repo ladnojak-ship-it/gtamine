@@ -69,6 +69,7 @@ public final class HostLink extends WebSocketServer {
 			switch (m.get("t").getAsString()) {
 				case "cam" -> HostState.update(m);
 				case "ground", "walls" -> WorldBridge.solid(ints(m.getAsJsonArray("c")));
+				case "clearblocks" -> WorldBridge.clearBuilt();
 				case "clear" -> WorldBridge.clearSolid();
 				case "cmd" -> WorldBridge.command(m.get("c").getAsString());
 				case "gta", "gtastate", "gtainfo", "director" -> this.relay(conn, message);

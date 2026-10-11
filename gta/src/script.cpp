@@ -2781,9 +2781,10 @@ namespace
 		}
 		if (key == VK_F9)
 		{
-			// every block that was ever mirrored, plus the host's own collision props: back to a bare lot
+			// Every block the player built, gone. Not the barriers: those are the host's own ground, walls and
+			// ceilings, and dropping them would put the player into the void.
 			props_clear_all();
-			g_ws.send("{\"t\":\"clear\"}");
+			g_ws.send("{\"t\":\"clearblocks\"}");
 			natives::Notify("Blocks ~r~cleared");
 			return;
 		}

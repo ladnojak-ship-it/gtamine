@@ -225,6 +225,50 @@ public final class WorldBridge {
 		Passthrough.events.accept("{\"t\":\"blocks\",\"set\":[" + set + "],\"clear\":[" + clear + "]}");
 	}
 
+	/**
+	 * Every block the player built, gone. The barriers the host placed are left exactly where they are: they
+	 * are GTA's own ground and walls, and removing them would drop the player into the void.
+	 */
+	public static void clearBuilt() {
+		MinecraftServer s = server;
+		if (s == null) {
+			return;
+		}
+
+		s.execute(() -> {
+			ServerLevel level = s.overworld();
+			ServerPlayer player = s.getPlayerList().getPlayers().isEmpty() ? null : s.getPlayerList().getPlayers().get(0);
+			if (player == null) {
+				return;
+			}
+
+			BlockPos c = player.blockPosition();
+			BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
+			placingGround = true; // nothing below is ours to replace
+			for (int x = -128; x <= 128; ++x) {
+				for (int z = -128; z <= 128; ++z) {
+					for (int y = -32; y <= 64; ++y) {
+						p.set(c.getX() + x, c.getY() + y, c.getZ() + z);
+						if (!level.isInWorldBounds(p) || !level.isLoaded(p)) {
+							continue;
+						}
+
+						BlockState state = level.getBlockState(p);
+						// a barrier is the host's world (ground, walls, ceilings), never the player's build
+						if (!state.isAir() && !state.is(Blocks.BARRIER)) {
+							level.setBlock(p, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE);
+						}
+					}
+				}
+			}
+
+			placingGround = false;
+			changes.clear();
+			Passthrough.events.accept("{\"t\":\"blocks\",\"clear\":[]}");
+			Passthrough.LOG.info("cleared the player's builds");
+		});
+	}
+
 	/** Every solid block within `radius` of the player, as one "blocks" message (the host's props start from this). */
 	public static void sync(final int radius) {
 		MinecraftServer s = server;
